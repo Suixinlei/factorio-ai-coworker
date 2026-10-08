@@ -67,6 +67,36 @@ FACTORIO_RCON_HOST=127.0.0.1 FACTORIO_RCON_PORT=27016 \
 注意：pkill 的模式必须匹配绝对路径（脚本传入的是绝对路径），用 `start-server.*local-server`；
 杀进程后务必等几秒再启动，否则报 `Couldn't acquire exclusive lock ... .lock`。
 
+## 发布到 Factorio Mod Portal
+
+公开发布前，先确认 `mod/info.json` 中的版本是三段式版本号，例如 `0.1.0`，并在 `mod/changelog.txt` 顶部添加对应版本说明。仓库提供的发布脚本会读取 Mod 元数据，生成符合 Factorio 目录要求的 `dist/ai-coworker_<版本>.zip`，并通过 Mod Portal API 上传。
+
+首次发布需要在 Factorio 账号的 API Key 页面创建带有 `ModPortal: Publish Mods` 权限的 Key。推荐把 Key 放在用户 shell 配置中，不要写入仓库：
+
+```bash
+# ~/.zshrc
+export FACTORIO_MOD_PORTAL_TOKEN=你的_Mod_Portal_API_Key
+```
+
+重新打开终端，或在当前终端加载配置后执行 dry-run：
+
+```bash
+source ~/.zshrc
+python3 scripts/publish-mod.py --dry-run
+unzip -t dist/ai-coworker_0.1.0.zip
+```
+
+确认压缩包结构和版本无误后正式发布：
+
+```bash
+source ~/.zshrc
+python3 scripts/publish-mod.py
+```
+
+脚本会提交 `utilities` 分类、MIT 许可证、Mod Portal 描述和 GitHub 源码地址；它不会打印 API Key。发布成功后可在 <https://mods.factorio.com/mod/ai-coworker> 检查版本和下载记录。
+
+如果需要发布新版本，先修改 `mod/info.json` 和 `mod/changelog.txt`，再重复 dry-run、ZIP 校验和正式发布流程。
+
 ## 客户端加入本地服
 
 如果你想用 GUI 客户端围观/手操：
