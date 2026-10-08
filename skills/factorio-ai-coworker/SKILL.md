@@ -119,7 +119,7 @@ JSON
 | `get_resource_patch` | `resource`、`radius`；`all=true` 或 `radius=0` 查全部已探知矿点 |
 | `can_place` | 放置实体及坐标参数 |
 | `nearest_buildable` | 实体及搜索位置参数 |
-| `scan_area` | `x/y`、`width`、`height` ≤128 |
+| `scan_area` | `x/y`、`width`、`height` ≤128 | 返回网格和精确实体清单；实体含世界坐标、旋转后 `bounding_box`，流体设备含 `fluid_connections.target_position`/连接状态，机械臂含取放位置和燃料信息。 |
 | `inspect_entity` | `x/y` 或 `position`、`radius`、`name` |
 | `get_enemies` | `x/y` 或 `position`、`radius` ≤200 |
 | `get_character_state` | 无 |

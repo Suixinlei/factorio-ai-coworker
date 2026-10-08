@@ -636,12 +636,17 @@ REGISTRY.scan_area = function(ctx, p)
             and t ~= "corpse" and t ~= "particle" and t ~= "item-on-ground" then
           mark(ex, ey, "B")
           if #entities < 500 then
+            local described = AIPerception.describe_entity(e, my_force)
             entities[#entities + 1] = {
               name        = e.name,
               type        = t,
               unit_number = e.unit_number,
-              position    = {x = round1(e.position.x), y = round1(e.position.y)},
+              position    = {x = e.position.x, y = e.position.y},
               direction   = DIR_NAMES[e.direction] or tostring(e.direction),
+              bounding_box = described.bounding_box,
+              fluid_connections = described.fluid_connections,
+              pickup_position = described.pickup_position,
+              drop_position = described.drop_position,
             }
           else
             truncated = true

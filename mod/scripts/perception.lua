@@ -110,6 +110,7 @@ local FLUID_CONN_TYPES = {
   ["generator"]         = true,  -- steam-engine
   ["offshore-pump"]     = true,
   ["pump"]              = true,
+  ["pipe"]              = true,
   ["assembling-machine"]= true,  -- fluid recipes later
 }
 
@@ -123,6 +124,9 @@ local function get_fluid_connections(entity)
     local fluid = nil
     local okf, filt = pcall(function() return fb.get_prototype(i).filter end)
     if okf and filt then fluid = filt.name end
+    local segment_contents
+    local oks, contents = pcall(function() return fb.get_fluid_segment_contents(i) end)
+    if oks and contents then segment_contents = contents end
     local okc, cs = pcall(function() return fb.get_pipe_connections(i) end)
     if okc and cs then
       for _, c in ipairs(cs) do
@@ -130,7 +134,11 @@ local function get_fluid_connections(entity)
           conns[#conns + 1] = {
             fluid    = fluid,
             flow     = c.flow_direction,
-            position = {x = round1(c.position.x), y = round1(c.position.y)},
+            position = {x = c.position.x, y = c.position.y},
+            target_position = c.target_position and {x = c.target_position.x, y = c.target_position.y},
+            connection_type = c.connection_type,
+            connected = c.target ~= nil,
+            segment_contents = segment_contents,
           }
         end
       end
@@ -345,7 +353,9 @@ function AIPerception.describe_entity(e, force)
   local entry = {
     name        = e.name,
     type        = e.type,
-    position    = {x = math.floor(e.position.x), y = math.floor(e.position.y)},
+    position    = {x = e.position.x, y = e.position.y},
+    bounding_box = {left_top = {x = e.bounding_box.left_top.x, y = e.bounding_box.left_top.y},
+                    right_bottom = {x = e.bounding_box.right_bottom.x, y = e.bounding_box.right_bottom.y}},
     unit_number = e.unit_number,
     is_enemy    = is_enemy(e, force),
     slots       = entity_slots(e.name),
@@ -366,7 +376,14 @@ function AIPerception.describe_entity(e, force)
   end
 
   -- Fuel for burner miners
-  if e.type == "mining-drill" and e.burner then
+  if e.burner then
+    entry.fuel = get_fuel_contents(e)
+  end
+  if e.type == "inserter" then
+    entry.pickup_position = e.pickup_position
+    entry.drop_position = e.drop_position
+  end
+  if e.type == "mining-drill" then
     entry.fuel = get_fuel_contents(e)
     entry.drop_position = e.drop_position
   end
