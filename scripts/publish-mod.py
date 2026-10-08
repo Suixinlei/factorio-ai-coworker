@@ -22,7 +22,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MOD_PORTAL = "https://mods.factorio.com"
-INIT_URL = f"{MOD_PORTAL}/api/v2/mods/init_publish"
+INIT_PUBLISH_URL = f"{MOD_PORTAL}/api/v2/mods/init_publish"
+INIT_UPLOAD_URL = f"{MOD_PORTAL}/api/v2/mods/releases/init_upload"
 
 
 def load_metadata(mod_dir: Path) -> dict[str, object]:
@@ -132,14 +133,20 @@ def main() -> int:
     if not token:
         raise SystemExit("Set FACTORIO_MOD_PORTAL_TOKEN (or MOD_PORTAL_API_KEY), or use --dry-run")
     description = args.description_file.read_text(encoding="utf-8")
-    init = request_json(
-        INIT_URL,
-        data=urllib.parse.urlencode({"mod": name}).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-    )
+    init_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    init_data = urllib.parse.urlencode({"mod": name}).encode("utf-8")
+    # Existing mods use the release-upload endpoint. Fall back to the
+    # create-mod endpoint only when the portal reports an unknown mod, so a
+    # typo or permission error cannot accidentally publish a new entry.
+    try:
+        init = request_json(INIT_UPLOAD_URL, data=init_data, headers=init_headers)
+    except SystemExit as error:
+        if "UnknownMod" not in str(error):
+            raise
+        init = request_json(INIT_PUBLISH_URL, data=init_data, headers=init_headers)
     upload_url = init.get("upload_url")
     if not isinstance(upload_url, str):
         raise SystemExit("Factorio API did not return a valid upload URL")

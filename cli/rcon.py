@@ -100,12 +100,12 @@ class RCONGateway:
     def set_annotation(self, agent_id: str, annotation: dict[str, Any]) -> dict[str, Any]:
         return self._remote("set_annotation", agent_id, annotation)
 
-    def run_skill(self, skill: str, params: dict[str, Any], agent_id: str) -> dict[str, Any]:
-        result = self._remote("run_skill", agent_id, skill, params)
+    def run_batch_action(self, action: str, params: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        result = self._remote("run_batch_action", agent_id, action, params)
         return {"ok": bool(result.get("ok")), "detail": str(result.get("detail", result.get("error", "")))}
 
-    def run_primitive(self, action: dict[str, Any], agent_id: str) -> dict[str, Any]:
-        result = self._remote("run_primitive", agent_id, action)
+    def run_atomic_action(self, action: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        result = self._remote("run_atomic_action", agent_id, action)
         return {"ok": bool(result.get("ok")), "detail": str(result.get("detail", result.get("error", "")))}
 
     def run_query(self, name: str, params: dict[str, Any], agent_id: str) -> dict[str, Any]:
@@ -114,10 +114,20 @@ class RCONGateway:
     def get_factory_state(self, agent_id: str) -> dict[str, Any]:
         return self._remote("get_state", agent_id)
 
-    def list_skills(self) -> list[str]:
-        value = self._remote("list_skills")
-        return value if isinstance(value, list) else []
+    def list_batch_actions(self) -> list[str]:
+        value = self._remote("list_batch_actions")
+        if not isinstance(value, list):
+            raise RuntimeError(str(value.get("error", value)) if isinstance(value, dict) else str(value))
+        return value
+
+    def list_atomic_actions(self) -> list[str]:
+        value = self._remote("list_atomic_actions")
+        if not isinstance(value, list):
+            raise RuntimeError(str(value.get("error", value)) if isinstance(value, dict) else str(value))
+        return value
 
     def list_queries(self) -> list[str]:
         value = self._remote("list_queries")
-        return value if isinstance(value, list) else []
+        if not isinstance(value, list):
+            raise RuntimeError(str(value.get("error", value)) if isinstance(value, dict) else str(value))
+        return value

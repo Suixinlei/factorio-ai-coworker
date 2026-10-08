@@ -552,8 +552,8 @@ function AIPerception.gather(character)
   -- Game phase (0–5)
   perception.game_phase = detect_game_phase(force)
 
-  -- Research state — nothing progresses unless a tech is queued (use the
-  -- research skill). current = nil means NO research is queued.
+  -- Research state — nothing progresses unless a technology is queued (use the
+  -- atomic research action). current = nil means NO research is queued.
   local cur = force.current_research
   perception.research = {
     current  = cur and cur.name or nil,
@@ -563,16 +563,16 @@ function AIPerception.gather(character)
   -- Whole-base machine view (scale-aware) + factory-wide maintenance needs.
   -- factory.summary scales to hundreds of machines (aggregate counts +
   -- nearest-first exceptions); factory.machines is the per-machine roster while
-  -- the base is small. needs is the same data bucketed for skill routing.
+  -- the base is small. needs is the same data bucketed for batch-action routing.
   local factory, needs = gather_factory(surface, force, pos)
   perception.factory = factory
   perception.needs = needs
   perception.power = compute_power(surface, force, factory.by_status)
   perception.production = compute_production(force, surface)
 
-  -- Human-placed entity-ghosts = explicit build intent (build_ghosts skill).
+  -- Human-placed entity-ghosts = explicit build intent (batch_build_ghost action).
   -- Search the ENTIRE surface: ghosts can be far from the character (e.g. an oil
-  -- outpost the human blueprinted 200+ tiles away). build_ghosts teleports there.
+  -- outpost the human blueprinted 200+ tiles away). batch_build_ghost teleports there.
   local ghost_entities = surface.find_entities_filtered{type = "entity-ghost"}
   local ghost_list = {}
   for _, g in ipairs(ghost_entities) do
@@ -589,8 +589,7 @@ function AIPerception.gather(character)
   end
   perception.ghosts = {count = #ghost_entities, list = ghost_list}
 
-  -- Human-marked deconstruction = explicit "remove this" intent (deconstruct
-  -- skill). Second-highest priority after ghosts. Mirrors the ghost block.
+  -- Human-marked deconstruction = explicit "remove this" intent (batch_mine action). Second-highest priority after ghosts. Mirrors the ghost block.
   local decon_entities = surface.find_entities_filtered{to_be_deconstructed = true}
   local decon_list = {}
   for _, m in ipairs(decon_entities) do
@@ -611,7 +610,7 @@ end
 -- Compact situation snapshot for external (MCP/harness) callers. Reuses the
 -- SAME registry-backed machine view the autonomous router sees (gather_factory),
 -- but skips the heavy nearby-entity/resource/water scans — a harness wants the
--- factory picture + maintenance needs to decide its next skill, not the full
+-- factory picture + maintenance needs to decide its next batch action, not the full
 -- 25-entity local detail. JSON-serialisable.
 -- -------------------------------------------------------------------------
 function AIPerception.factory_state(character)
@@ -622,7 +621,7 @@ function AIPerception.factory_state(character)
   local factory, needs = gather_factory(surface, force, pos)
 
   -- The router consumes the per-machine `needs` lists; a harness only needs the
-  -- counts to gauge how much maintenance is pending (it can act via fill etc).
+  -- counts to gauge how much maintenance is pending (it can act via batch_insert etc).
   local needs_counts = {}
   for bucket, list in pairs(needs) do needs_counts[bucket] = #list end
 
@@ -660,8 +659,7 @@ function AIPerception.factory_state(character)
   }
 end
 
--- Exported for the skills layer: post-build audits (place_batch / build_ghosts
--- / review_build) share the same status vocabulary as factory attention.
+-- Exported for the batch-action layer: post-build audits (batch_build_ghost / batch_review_build) share the same status vocabulary as factory attention.
 AIPerception.status_string  = status_string
 AIPerception.PROBLEM_STATUS = PROBLEM_STATUS
 

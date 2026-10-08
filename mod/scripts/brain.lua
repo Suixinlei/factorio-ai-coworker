@@ -140,7 +140,7 @@ function AIBrain.request_decision(character, user_message)
     todo_lists          = mem.todo_lists,
     recent_actions      = mem.recent_actions,
     user_directive      = mem.user_directive,
-    force_skill         = mem.force_skill,
+    force_batch_action         = mem.force_batch_action,
     last_action_results = mem.last_action_results,
   }
 
@@ -189,13 +189,13 @@ function AIBrain.handle_response(req_id, actions_json)
 
   local entries = AIBrain.parse_actions(actions_json)
   if not entries or #entries == 0 then
-    game.print("[AI Brain] No valid skill/action entries parsed from response", {r=1, g=0.5, b=0})
+    game.print("[AI Brain] No valid action entries parsed from response", {r=1, g=0.5, b=0})
     return
   end
 
-  -- Entries may be skills {skill=...} or primitives {action=...}; the unified
-  -- executor dispatches each and records E1 results.
-  AISkills.execute(storage.ai_player.character, entries)
+  -- Entries use {action=...}; the unified executor dispatches batch and atomic
+  -- actions and records E1 results.
+  AIBatchActions.execute(storage.ai_player.character, entries)
 end
 
 -- -------------------------------------------------------------------------
@@ -266,7 +266,7 @@ function AIBrain.parse_actions(json_str)
 
     local obj_str = array_str:sub(obj_start, obj_end)
     local action = AIBrain.parse_action_object(obj_str)
-    if action and (action.action or action.skill) then
+    if action and action.action then
       table.insert(actions, action)
     end
 
@@ -310,8 +310,8 @@ end
 function AIBrain.parse_action_object(obj_str)
   local action = {}
 
-  -- String fields (primitive + skill params)
-  for _, field in ipairs({"action","skill","direction","item","name","type","recipe",
+  -- String fields shared by batch and atomic actions.
+  for _, field in ipairs({"action","direction","item","name","type","recipe",
                            "ore","output","message","text","title","inventory","slot"}) do
     local val = json_extract_string(obj_str, field)
     if val then action[field] = val end
@@ -363,7 +363,7 @@ function AIBrain.init_memory()
     last_action_results         = {},   -- E1: outcome of each action from the last turn
     user_directive              = nil,
     directive_expire_tick       = nil,
-    force_skill                 = nil,  -- if set, the router prompt is gated to this skill
+    force_batch_action                 = nil,  -- if set, the router prompt is gated to this batch action
   }
 end
 
@@ -377,14 +377,15 @@ function AIBrain.set_directive(text, duration_ticks)
   local mem = storage.ai_player.memory
   mem.user_directive = text
   mem.directive_expire_tick = game.tick + (duration_ticks or 1800)
-  -- If the directive's first word names a skill (e.g. "gather wood",
-  -- "gather on iron-ore"), gate the router to that action until expiry.
+  -- If the directive's first word names a batch action, gate the router to it
+  -- until expiry.
   -- Otherwise leave it as a soft directive the model interprets freely.
   local first = text:match("^%s*(%S+)")
-  if first and AISkills.REGISTRY[first] then
-    mem.force_skill = first
+  local canonical = first and AIBatchActions.canonical(first) or nil
+  if canonical and AIBatchActions.REGISTRY[canonical] then
+    mem.force_batch_action = canonical
   else
-    mem.force_skill = nil
+    mem.force_batch_action = nil
   end
 end
 
@@ -393,7 +394,7 @@ function AIBrain.process_directive_expiry(current_tick)
   if mem.directive_expire_tick and current_tick > mem.directive_expire_tick then
     mem.user_directive = nil
     mem.directive_expire_tick = nil
-    mem.force_skill = nil
+    mem.force_batch_action = nil
   end
 end
 

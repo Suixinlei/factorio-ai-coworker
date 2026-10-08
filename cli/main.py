@@ -20,15 +20,17 @@ from .config import ConfigLoader
 from .rcon import RCONGateway
 
 
-SKILLS = {
-    "build_ghosts", "deconstruct", "clear_area", "plan_blueprint",
-    "place_batch", "review_build", "clear_ghosts", "plan_mining_outpost",
-    "gather", "fill", "collect", "deposit_to_chest",
-    "return_home", "goto", "research",
+BATCH_ACTIONS = {
+    "batch_build_ghost", "batch_mine", "batch_create_ghost",
+    "batch_review_build", "batch_remove_ghost",
+    "batch_insert", "batch_take", "batch_pickup",
 }
-PRIMITIVES = {
+ATOMIC_ACTIONS = {
     "move", "mine", "place", "set_recipe", "craft", "pickup", "chat",
-    "insert", "take", "summary", "wait",
+    "goto", "research", "insert", "take", "summary", "wait",
+    "create_ghost", "build_ghost", "remove_ghost", "review_build",
+    "shoot", "add_note", "view_notes", "create_todo", "add_todo",
+    "complete_todo", "view_todo",
 }
 QUERIES = {
     "can_place", "get_recipe", "get_resource_patch", "inspect_entity",
@@ -68,30 +70,76 @@ def state_hash(state: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:12]
 
 
-def validate_steps(value: Any) -> list[dict[str, Any]]:
+def _canonical_compound(name: str) -> str:
+    return name.strip().lower()
+
+
+def _read_action_file(raw_path: str, base_dir: Path, action: str) -> dict[str, Any]:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = base_dir / path
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise UsageError(f"action file '{path}' could not be read: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise UsageError(f"action file '{path}' must be valid JSON: {exc.msg}") from exc
+    if isinstance(payload, list):
+        if action in {"batch_create_ghost", "batch_build_ghost"}:
+            return {"entities": payload}
+        if action == "batch_mine":
+            return {"areas": payload}
+        raise UsageError(f"action file lists are only supported for {action}=entities/areas")
+    if not isinstance(payload, dict):
+        raise UsageError(f"action file '{path}' must contain a JSON object or array")
+    return payload
+
+
+def _expand_action_files(steps: list[dict[str, Any]], base_dir: Path) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    for item in steps:
+        item = dict(item)
+        key = "action"
+        name = item[key]
+        if "file" in item:
+            payload = _read_action_file(str(item.pop("file")), base_dir, name)
+            payload.update(item)
+            item = {key: name, **payload}
+        # The Factorio-side batch handlers cap explicit entity lists at 500.
+        # Split a file-backed blueprint into valid requests automatically.
+        entities = item.get("entities")
+        if (name in {"batch_create_ghost", "batch_build_ghost"}
+                and isinstance(entities, list) and len(entities) > 500
+                and item.get("use") is None):
+            for start in range(0, len(entities), 500):
+                part = dict(item)
+                part["entities"] = entities[start:start + 500]
+                expanded.append(part)
+        else:
+            expanded.append(item)
+    return expanded
+
+
+def validate_steps(value: Any, *, max_steps: int = 4,
+                   file_base_dir: Path | None = None) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value:
         raise UsageError("steps must be a non-empty JSON array")
-    if len(value) > 4:
-        raise UsageError("at most 4 steps are allowed")
+    if len(value) > max_steps:
+        raise UsageError(f"at most {max_steps} steps are allowed")
     result = []
     for index, item in enumerate(value):
-        if not isinstance(item, dict) or (("skill" in item) == ("action" in item)):
-            raise UsageError(f"step {index} needs exactly one of skill or action")
+        if not isinstance(item, dict) or "action" not in item or "skill" in item:
+            raise UsageError(f"step {index} needs exactly one action key")
         item = dict(item)
-        if "skill" in item:
-            name = str(item["skill"]).strip().lower()
-            if name not in SKILLS:
-                raise UsageError(f"unsupported action '{name}'")
-            item["skill"] = name
-        else:
-            name = str(item.pop("action")).strip().lower()
-            if name in SKILLS:
-                item["skill"] = name  # compound action via the unified key
-            elif name in PRIMITIVES:
-                item["action"] = name
-            else:
-                raise UsageError(f"unsupported action '{name}'")
+        name = _canonical_compound(str(item["action"]))
+        if name not in BATCH_ACTIONS and name not in ATOMIC_ACTIONS:
+            raise UsageError(f"unsupported action '{name}'")
+        item["action"] = name
         result.append(item)
+    if file_base_dir is not None:
+        result = _expand_action_files(result, file_base_dir)
+        if len(result) > max_steps:
+            raise UsageError(f"action file expands to {len(result)} steps; limit is {max_steps}")
     return result
 
 
@@ -178,9 +226,9 @@ class Client:
 
     def catalog(self) -> dict[str, Any]:
         return {
-            "skills": self.gateway.list_skills(),
+            "batch_actions": self.gateway.list_batch_actions(),
+            "atomic_actions": self.gateway.list_atomic_actions(),
             "queries": self.gateway.list_queries(),
-            "primitives": sorted(PRIMITIVES),
         }
 
     def annotate(self, args: argparse.Namespace) -> Any:
@@ -204,7 +252,14 @@ class Client:
         raw = Path(args.file).read_text(encoding="utf-8") if args.file else args.steps
         if bool(args.file) == bool(args.steps):
             raise UsageError("provide exactly one STEPS argument or --file")
-        steps = validate_steps(parse_json(raw, "steps"))
+        value = parse_json(raw, "steps")
+        if isinstance(value, dict) and isinstance(value.get("steps"), list):
+            value = value["steps"]
+        steps = validate_steps(
+            value,
+            max_steps=256 if args.file else 4,
+            file_base_dir=Path(args.file).resolve().parent if args.file else Path.cwd(),
+        )
         if args.dry_run:
             return {"ok": True, "dry_run": True, "steps": steps}
         self.require_agent()
@@ -217,10 +272,9 @@ class Client:
         results = []
         for index, item in enumerate(steps):
             call = dict(item)
-            key = "skill" if "skill" in call else "action"
-            name = call.pop(key)
-            result = (self.gateway.run_skill(name, call, self.agent_id)
-                      if key == "skill" else self.gateway.run_primitive({"action": name, **call}, self.agent_id))
+            name = call.pop("action")
+            result = (self.gateway.run_batch_action(name, call, self.agent_id)
+                      if name in BATCH_ACTIONS else self.gateway.run_atomic_action({"action": name, **call}, self.agent_id))
             row = {"step": index, "name": name, **result}
             results.append(row)
             if args.stop_on_failure and not row.get("ok"):
@@ -247,7 +301,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--pretty", action="store_true")
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
-    sub.add_parser("catalog", help="list server skills, queries, and CLI primitives")
+    sub.add_parser("catalog", help="list server batch actions, atomic actions, and queries")
     session = sub.add_parser("session")
     ss = session.add_subparsers(dest="session_action", required=True)
     ss.add_parser("list")

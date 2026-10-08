@@ -1,4 +1,4 @@
--- Dynamic character profiles. Legacy skill modules receive a scoped context;
+-- Dynamic character profiles. Batch action modules receive a scoped context;
 -- it is always restored, including when a handler raises an error.
 AIAgents = {}
 local function valid_id(id)

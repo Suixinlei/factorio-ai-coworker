@@ -1,18 +1,22 @@
--- Skill layer (v3).
+-- Batch action orchestration.
 --
--- A "skill" is a parameterized basic loop. Skills own the deterministic MECHANICS
--- (positions, orientation, fuelling, drop-positions); the LLM only chooses which
--- skill and its params. Skills orchestrate the proven PRIMITIVE handlers
+-- A batch action is a parameterized loop. Batch actions own the deterministic
+-- mechanics (positions, orientation, fuelling, drop-positions); the LLM only
+-- chooses the action and its params. Batch actions orchestrate atomic handlers
 -- (AIActions.run) wherever possible, so placement legality / slot resolution /
--- mining all stay in one place (primitives.lua).
+-- mining all stay in one place (atomic_actions.lua).
 --
--- Each skill: function(character, params) -> (ok:boolean, detail:string)
+-- Each batch action: function(character, params) -> (ok:boolean, detail:string)
 -- detail feeds the E1 result loop, so make it specific and actionable.
 
-AISkills = {}
+AIBatchActions = {}
+
+function AIBatchActions.canonical(name)
+  return tostring(name or ""):lower()
+end
 
 -- Water tile names (mirror of queries.lua SCAN_WATER_TILES) for the ghost
--- water-guard in plan_blueprint.
+-- water-guard in batch_create_ghost.
 local WATER_TILE_NAMES = {
   ["water"] = true, ["deepwater"] = true, ["water-green"] = true,
   ["deepwater-green"] = true, ["water-shallow"] = true, ["water-mud"] = true,
@@ -64,7 +68,7 @@ local function aligned_position(name, x, y, dir)
   return {x = ax, y = ay}
 end
 
--- Compact "skipped entries" renderer shared by the batch skills.
+-- Compact "skipped entries" renderer shared by batch actions.
 local function format_skipped(skipped)
   local parts = {}
   for i = 1, math.min(#skipped, 3) do
@@ -76,24 +80,25 @@ local function format_skipped(skipped)
 end
 
 -- Post-build audit: status buckets for everything just placed/built, problem
--- entities listed explicitly. Shared by place_batch, build_ghosts and
--- review_build so every build path reports the same way.
+-- entities listed explicitly. Shared by batch_build_ghost and
+-- batch_review_build so every build path reports the same way.
 local SKIP_AUDIT_TYPES = {
   ["character"] = true, ["entity-ghost"] = true, ["resource"] = true,
   ["tree"] = true, ["simple-entity"] = true, ["cliff"] = true,
   ["corpse"] = true, ["particle"] = true, ["item-on-ground"] = true,
 }
 
-local function audit_entities(ents)
+local function audit_entities(character, ents)
   local by_status, problems, total = {}, {}, 0
   for _, e in ipairs(ents) do
     if e.valid and not SKIP_AUDIT_TYPES[e.type] then
-      total = total + 1
-      local st = AIPerception.status_string(e) or "normal"
-      by_status[st] = (by_status[st] or 0) + 1
-      if AIPerception.PROBLEM_STATUS[st] and #problems < 20 then
-        problems[#problems + 1] = string.format("%s@%d,%d %s",
-          e.name, math.floor(e.position.x), math.floor(e.position.y), st)
+      local _, detail, record = AIActions.run(character, {
+        action = "review_build", name = e.name, position = e.position, radius = 0.1,
+      })
+      if record then
+        total = total + 1
+        by_status[record.status] = (by_status[record.status] or 0) + 1
+        if record.problem and #problems < 20 then problems[#problems + 1] = detail end
       end
     end
   end
@@ -111,7 +116,7 @@ local function audit_detail(a)
   return s
 end
 
--- Remember the most recent batch per character so review_build has a default.
+-- Remember the most recent batch per character so batch_review_build has a default.
 local function remember_build(character, ents)
   storage.ai_last_build = storage.ai_last_build or {}
   local rec = {tick = game.tick, entries = {}}
@@ -123,7 +128,7 @@ local function remember_build(character, ents)
   storage.ai_last_build[character.unit_number] = rec
 end
 
--- Remember the most recent plan_mining_outpost plan per character so place_batch
+-- Remember the most recent batch_create_ghost layout=mining_outpost plan per character so batch_build_ghost
 -- (use="last_plan") can execute it without the agent re-sending coordinates —
 -- the planner's geometry never leaves the mod. Entries are LIVE ghost refs:
 -- reviving or clearing a ghost invalidates its ref, so the record always
@@ -151,12 +156,12 @@ local function remember_plan(character, ghosts)
 end
 
 -- -------------------------------------------------------------------------
--- gather(item, count) — mine the nearest sources of `item` until `count`.
+-- batch_mine(item, count) — mine the nearest sources of `item` until `count`.
 -- Handles wood (mine trees by type) and ores/rocks (mine by name).
 -- -------------------------------------------------------------------------
-local function skill_gather(character, p)
+local function batch_action_gather(character, p)
   local item = p.item
-  if not item then return false, "gather: missing 'item'" end
+  if not item then return false, "batch_mine: missing 'item'" end
   local need = math.min(p.count or 50, 300)
   local surface = character.surface
   local inv = inv_of(character)
@@ -165,7 +170,7 @@ local function skill_gather(character, p)
 
   local have0 = inv.get_item_count(item)
   if have0 >= need then
-    return true, string.format("gather: already have %d %s (need %d) — nothing to gather", have0, item, need)
+    return true, string.format("batch_mine: already have %d %s (need %d) — nothing to batch_mine", have0, item, need)
   end
 
   for _ = 1, 150 do
@@ -186,7 +191,10 @@ local function skill_gather(character, p)
     local sp = surface.find_non_colliding_position("character", src.position, 3, 0.5)
     if sp then character.teleport(sp) end
     local before = inv.get_item_count()
-    character.mine_entity(src, true)
+    local mined = AIActions.run(character, {
+      action = "mine", name = src.name, position = src.position, radius = 1,
+    })
+    if not mined then break end
     local delta = inv.get_item_count() - before
     if delta <= 0 then break end  -- inventory full or stuck
     gained = gained + delta
@@ -194,7 +202,7 @@ local function skill_gather(character, p)
 
   local have = inv.get_item_count(item)
   if gained == 0 then
-    return false, "gather: no reachable " .. item .. " sources within 40 tiles"
+    return false, "batch_mine: no reachable " .. item .. " sources within 40 tiles"
   end
   return true, string.format("gathered %d %s (now have %d)", gained, item, have)
 end
@@ -235,7 +243,7 @@ local function pole_geometry(pole_proto)
 end
 
 -- -------------------------------------------------------------------------
--- plan_mining_outpost(resource, x,y?, direction?, drill?, pole?, belt?,
+-- batch_create_ghost layout=mining_outpost(resource, x,y?, direction?, drill?, pole?, belt?,
 --                      min_ore?, max_drills?, radius?) — fully-automatic
 -- mining outpost planner: ONE call turns an ore patch into a complete ghost
 -- layout of mining drills + output belts + power poles. The model picks the
@@ -259,38 +267,38 @@ end
 -- flow east/west → rows run along x; north/south → transposed. Blocked
 -- slots are skipped+reported; ghosts never expire; re-runs extend the plan
 -- (the plan registry merges, so use=last_plan always covers the WHOLE outpost).
--- Execution: gather/craft + place_batch use="last_plan" (or build_ghosts).
+-- Execution: batch_mine/craft + batch_build_ghost use="last_plan" (or batch_build_ghost).
 -- -------------------------------------------------------------------------
-local function skill_plan_mining_outpost(character, p)
+local function batch_action_plan_mining_outpost(character, p)
   local resource = p.resource or p.item or "iron-ore"
   local res_proto = prototypes.entity[resource]
   if not res_proto or res_proto.type ~= "resource" then
-    return false, "plan_mining_outpost: '" .. tostring(resource) .. "' is not a resource name"
+    return false, "batch_create_ghost layout=mining_outpost: '" .. tostring(resource) .. "' is not a resource name"
   end
   if resource == "crude-oil" then
-    return false, "plan_mining_outpost: crude-oil needs pumpjacks, not mining drills"
+    return false, "batch_create_ghost layout=mining_outpost: crude-oil needs pumpjacks, not mining drills"
   end
   if resource == "uranium-ore" then
-    return false, "plan_mining_outpost: uranium-ore needs sulfuric-acid plumbing — not supported yet"
+    return false, "batch_create_ghost layout=mining_outpost: uranium-ore needs sulfuric-acid plumbing — not supported yet"
   end
 
   -- Drill tier → lattice geometry, straight from the prototype.
   local drill = p.drill or "electric-mining-drill"
   local drill_proto = prototypes.entity[drill]
   if not drill_proto or drill_proto.type ~= "mining-drill" then
-    return false, "plan_mining_outpost: '" .. tostring(drill) .. "' is not a mining drill"
+    return false, "batch_create_ghost layout=mining_outpost: '" .. tostring(drill) .. "' is not a mining drill"
   end
   local F = drill_proto.tile_width or 3
   if F ~= (drill_proto.tile_height or F) or F % 2 == 0 then
-    return false, "plan_mining_outpost: only odd square-footprint drills are supported"
-      .. " (burner-mining-drill: plan a single drill with plan_blueprint + place_batch instead)"
+    return false, "batch_create_ghost layout=mining_outpost: only odd square-footprint drills are supported"
+      .. " (burner-mining-drill: plan a single drill with batch_create_ghost + batch_build_ghost instead)"
   end
   local H = math.floor(drill_proto.mining_drill_radius or (F / 2))
   local S = 2 * H + 1                -- lattice step: full coverage, no overlap
   local B = math.floor(F / 2) + 1    -- belt row offset from the drill centre row
   if S - F < 1 then
     return false, string.format(
-      "plan_mining_outpost: %s mining area leaves no belt gap between rows (footprint %dx%d, step %d)",
+      "batch_create_ghost layout=mining_outpost: %s mining area leaves no belt gap between rows (footprint %dx%d, step %d)",
       drill, F, F, S)
   end
 
@@ -303,14 +311,14 @@ local function skill_plan_mining_outpost(character, p)
   -- generic DIRECTION_MAP would happily accept (northeast etc.).
   if flow ~= defines.direction.north and flow ~= defines.direction.east
       and flow ~= defines.direction.south and flow ~= defines.direction.west then
-    return false, "plan_mining_outpost: direction must be north/east/south/west"
+    return false, "batch_create_ghost layout=mining_outpost: direction must be north/east/south/west"
   end
   local along_x = (flow == defines.direction.east or flow == defines.direction.west)
 
   local belt = p.belt or "transport-belt"
   local belt_proto = prototypes.entity[belt]
   if not belt_proto or belt_proto.type ~= "transport-belt" then
-    return false, "plan_mining_outpost: '" .. tostring(belt) .. "' is not a transport belt"
+    return false, "batch_create_ghost layout=mining_outpost: '" .. tostring(belt) .. "' is not a transport belt"
   end
   local pole = p.pole
   if not pole then
@@ -319,7 +327,7 @@ local function skill_plan_mining_outpost(character, p)
   end
   local pole_proto = prototypes.entity[pole]
   if not pole_proto or pole_proto.type ~= "electric-pole" then
-    return false, "plan_mining_outpost: '" .. tostring(pole) .. "' is not an electric pole"
+    return false, "batch_create_ghost layout=mining_outpost: '" .. tostring(pole) .. "' is not an electric pole"
   end
   local supply, wire, pole_known = pole_geometry(pole_proto)
   -- Conservative chain spacing: neighbours auto-wire (step < wire) and every
@@ -331,7 +339,7 @@ local function skill_plan_mining_outpost(character, p)
   local required_reach = math.max(math.ceil(S / 2), math.floor(pole_step / 2))
   if street_reach < required_reach then
     return false, string.format(
-      "plan_mining_outpost: %s (supply %g) cannot power a %s lattice (rows %d apart, needs reach %d) — pass a bigger pole (e.g. substation)",
+      "batch_create_ghost layout=mining_outpost: %s (supply %g) cannot power a %s lattice (rows %d apart, needs reach %d) — pass a bigger pole (e.g. substation)",
       pole, supply, drill, S, required_reach)
   end
 
@@ -358,7 +366,7 @@ local function skill_plan_mining_outpost(character, p)
   end
   if n_ore == 0 then
     return false, string.format(
-      "plan_mining_outpost: no %s tiles within %d of {%d,%d} — get_resource_patch then pass x/y",
+      "batch_create_ghost layout=mining_outpost: no %s tiles within %d of {%d,%d} — get_resource_patch then pass x/y",
       resource, radius, center.x, center.y)
   end
 
@@ -400,7 +408,7 @@ local function skill_plan_mining_outpost(character, p)
   local total, already, occupied = 0, 0, 0
   local planned = {}  -- ghost refs placed THIS run -> remember_plan registry
   local occupant_list, occupant_seen = {}, {}
-  -- Ghost semantics match plan_blueprint (0.7.10): can_place_entity with
+  -- Ghost semantics match batch_create_ghost (0.7.10): can_place_entity with
   -- build_check_type=blueprint_ghost is STRICTER than real ghost placement
   -- (drill/belt ghosts over trees are routine in GUI blueprints), so we only
   -- guard the centre tile against water and let create_entity's own
@@ -433,10 +441,13 @@ local function skill_plan_mining_outpost(character, p)
     if WATER_TILE_NAMES[tile.name] then
       return nil, "blocked"
     end
-    local g = surface.create_entity{
-      name = "entity-ghost", inner_name = name, position = pos,
-      direction = dir, force = force, expires = false,
-    }
+    local ok = AIActions.run(character, {
+      action = "create_ghost", name = name, position = pos, direction = dir,
+    })
+    if not ok then return nil, "blocked" end
+    local g = surface.find_entities_filtered{
+      type = "entity-ghost", ghost_name = name, position = pos, radius = 0.1, force = force,
+    }[1]
     if not (g and g.valid) then return nil, "blocked" end
     existing[key] = true
     total = total + 1
@@ -518,7 +529,7 @@ local function skill_plan_mining_outpost(character, p)
   local pre_planned = already_drills > 0
   if drills == 0 and not pre_planned then
     return false, string.format(
-      "plan_mining_outpost: no placeable drill slots on the %s patch (%d skipped — clear_area/deconstruct blockers, or lower min_ore)",
+      "batch_create_ghost layout=mining_outpost: no placeable drill slots on the %s patch (%d skipped — batch_mine blockers, or lower min_ore)",
       resource, drill_skip)
   end
 
@@ -571,11 +582,11 @@ local function skill_plan_mining_outpost(character, p)
     -- Complete no-op re-run: every slot (drills, belts, poles) already there.
     remember_plan(character, planned)
     return true, string.format(
-      "plan_mining_outpost: %s patch already planned (%d %s slot(s) kept) — proceed to place_batch use=last_plan",
+      "batch_create_ghost layout=mining_outpost: %s patch already planned (%d %s slot(s) kept) — proceed to batch_build_ghost use=last_plan",
       resource, already_drills, drill)
   end
   local detail = string.format(
-    "planned %s outpost: %d %s (skip %d) + %d %s (skip %d) + %d %s (skip %d), coverage %d%% of %d tiles, flow=%s; need %dx %s + %dx %s + %dx %s — then place_batch use=last_plan (or build_ghosts)",
+    "planned %s outpost: %d %s (skip %d) + %d %s (skip %d) + %d %s (skip %d), coverage %d%% of %d tiles, flow=%s; need %dx %s + %dx %s + %dx %s — then batch_build_ghost use=last_plan (or batch_build_ghost)",
     resource, drills, drill, drill_skip, belts, belt, belt_skip, poles, pole, pole_skip,
     cover_pct, n_ore, flow_name, drills, drill, belts, belt, poles, pole)
   if already > 0 then detail = detail .. string.format("; %d slot(s) already planned or built (kept)", already) end
@@ -608,7 +619,7 @@ local function skill_plan_mining_outpost(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- fill(items? | item+count?, radius?) — GENERIC batch resupply action: push
+-- batch_insert(items? | item+count?, radius?) — GENERIC batch resupply action: push
 -- items from inventory into nearby machines and containers.
 --   * items=[{name,count},...] (or single item+count): each named item goes
 --     to every nearby entity that accepts it — burners via their FUEL slot
@@ -620,7 +631,7 @@ end
 --     ingredients, labs take carried science packs, turrets take ammo.
 -- radius default 48.
 -- -------------------------------------------------------------------------
-local function skill_fill(character, p)
+local function batch_action_fill(character, p)
   local surface = character.surface
   local inv = inv_of(character)
   local radius = math.min(tonumber(p.radius) or 48, 128)
@@ -640,7 +651,7 @@ local function skill_fill(character, p)
   end
   for _, req in ipairs(requests) do
     if not prototypes.item[req.name] then
-      return false, "fill: unknown item '" .. tostring(req.name) .. "'"
+      return false, "batch_insert: unknown item '" .. tostring(req.name) .. "'"
     end
   end
 
@@ -662,7 +673,7 @@ local function skill_fill(character, p)
     local proto = prototypes.entity[e.name]
     local burner = proto and proto.burner_prototype
     if not burner then return {} end
-    -- fuel_categories is a DICT {name=true} — collect KEYS.
+    -- fuel_categories is a DICT {name=true} — batch_take KEYS.
     local cats = {}
     for c in pairs(burner.fuel_categories or {}) do cats[c] = true end
     local out = {}
@@ -677,13 +688,17 @@ local function skill_fill(character, p)
   end
 
   local filled, used = 0, {}
-  local function give(target, item, give_count)
-    local ins = target.insert{name = item, count = give_count}
-    if ins > 0 then
-      inv.remove{name = item, count = ins}
+  local function give(target, item, give_count, slot)
+    local before = inv.get_item_count(item)
+    local ok = AIActions.run(character, {
+      action = "insert", item = item, count = give_count,
+      position = target.position, radius = 1, inventory = slot,
+    })
+    local inserted = before - inv.get_item_count(item)
+    if ok and inserted > 0 then
       filled = filled + 1
-      used[item] = (used[item] or 0) + ins
-      return ins
+      used[item] = (used[item] or 0) + inserted
+      return inserted
     end
     return 0
   end
@@ -709,7 +724,7 @@ local function skill_fill(character, p)
           local have = fb.get_item_count(choice)
           if have < cap then
             local give_n = math.min(cap - have, inv.get_item_count(choice))
-            if give_n > 0 then give(fb, choice, give_n) end
+            if give_n > 0 then give(e, choice, give_n, "fuel") end
           end
         end
       else
@@ -717,7 +732,11 @@ local function skill_fill(character, p)
         if #requests > 0 then
           for _, req in ipairs(requests) do
             local carried = inv.get_item_count(req.name)
-            if carried > 0 then give(e, req.name, math.min(req.count, carried)) end
+            if carried > 0 then
+              local slot = (e.type == "lab" and "lab")
+                or (e.type == "ammo-turret" and "ammo") or "input"
+              give(e, req.name, math.min(req.count, carried), slot)
+            end
           end
         else
           -- Smart mode: recipe ingredients / science packs / ammo.
@@ -746,7 +765,11 @@ local function skill_fill(character, p)
           if wants then
             for item, want in pairs(wants) do
               local carried = inv.get_item_count(item)
-              if carried > 0 then give(e, item, math.min(want, carried)) end
+              if carried > 0 then
+                local slot = (e.type == "lab" and "lab")
+                  or (e.type == "ammo-turret" and "ammo") or "input"
+                give(e, item, math.min(want, carried), slot)
+              end
             end
           end
         end
@@ -755,7 +778,7 @@ local function skill_fill(character, p)
   end
 
   if filled == 0 then
-    return false, "fill: nothing nearby accepted anything (wrong item, nothing needed, or out of range)"
+    return false, "batch_insert: nothing nearby accepted anything (wrong item, nothing needed, or out of range)"
   end
   local parts = {}
   for name, c in pairs(used) do parts[#parts + 1] = c .. "x " .. name end
@@ -764,13 +787,13 @@ local function skill_fill(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- collect(items=[{name,count},...] | item+count, radius?) — GENERIC batch
+-- batch_take(items=[{name,count},...] | item+count, radius?) — GENERIC batch
 -- fetch action: take EXACTLY the requested items from nearby containers
 -- (any force — chests are the human↔AI sharing channel), nearest first.
 -- There is deliberately NO take-everything mode; machines' internal slots
 -- are never touched. Reports per-item totals and shortfalls.
 -- -------------------------------------------------------------------------
-local function skill_collect(character, p)
+local function batch_action_collect(character, p)
   local surface = character.surface
   local inv = inv_of(character)
   local radius = math.min(tonumber(p.radius) or 32, 128)
@@ -788,11 +811,11 @@ local function skill_collect(character, p)
     requests[#requests + 1] = {name = p.item, remaining = math.min(tonumber(p.count), 1000), taken = 0}
   end
   if #requests == 0 then
-    return false, "collect: pass items=[{name,count},...] or item+count (no take-everything mode)"
+    return false, "batch_take: pass items=[{name,count},...] or item+count (no take-everything mode)"
   end
   for _, req in ipairs(requests) do
     if not prototypes.item[req.name] then
-      return false, "collect: unknown item '" .. tostring(req.name) .. "'"
+      return false, "batch_take: unknown item '" .. tostring(req.name) .. "'"
     end
   end
 
@@ -821,9 +844,14 @@ local function skill_collect(character, p)
           if req.remaining > 0 then
             local avail = ci.get_item_count(req.name)
             if avail > 0 then
-              local n = inv.insert{name = req.name, count = math.min(avail, req.remaining)}
-              if n > 0 then
-                ci.remove{name = req.name, count = n}
+              local before = inv.get_item_count(req.name)
+              local ok = AIActions.run(character, {
+                action = "take", item = req.name,
+                position = chest.position, radius = 1,
+                inventory = "chest", count = math.min(avail, req.remaining),
+              })
+              local n = inv.get_item_count(req.name) - before
+              if ok and n > 0 then
                 req.remaining = req.remaining - n
                 req.taken = req.taken + n
                 done = done + n
@@ -840,7 +868,7 @@ local function skill_collect(character, p)
   end
 
   if done == 0 then
-    return false, "collect: none of the requested items found in containers within " .. radius .. " tiles"
+    return false, "batch_take: none of the requested items found in containers within " .. radius .. " tiles"
   end
   local parts = {}
   for _, req in ipairs(requests) do
@@ -852,11 +880,11 @@ local function skill_collect(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- deposit_to_chest(radius?, keep?) — deposit excess inventory into a nearby
+-- batch_insert(radius?, keep?) — deposit excess inventory into a nearby
 -- chest. Keeps `keep` of each item; deposits the rest. Use for inventory
 -- management and AI→human resource sharing.
 -- -------------------------------------------------------------------------
-local function skill_deposit_to_chest(character, p)
+local function batch_action_deposit_to_chest(character, p)
   local surface = character.surface
   local radius  = math.min(p.radius or 32, 128)
   local keep    = math.max(p.keep or 50, 0)
@@ -867,7 +895,7 @@ local function skill_deposit_to_chest(character, p)
     position = character.position, radius = radius,
   }
   if #chests == 0 then
-    return false, "deposit_to_chest: no chests within " .. radius .. " tiles"
+    return false, "batch_insert: no chests within " .. radius .. " tiles"
   end
 
   local cp = character.position
@@ -883,19 +911,20 @@ local function skill_deposit_to_chest(character, p)
     local want, remaining = p.item, tonumber(p.count) or 0
     for _, chest in ipairs(chests) do
       if chest.valid and remaining > 0 then
-        local ci = chest.get_inventory(defines.inventory.chest)
-        if ci then
-          local n = ci.insert{name = want, count = remaining}
-          if n > 0 then
-            inv.remove{name = want, count = n}
-            deposited[want] = (deposited[want] or 0) + n
-            remaining = remaining - n
-          end
+        local before = inv.get_item_count(want)
+        local ok = AIActions.run(character, {
+          action = "insert", item = want, count = remaining,
+          position = chest.position, radius = 1, inventory = "chest",
+        })
+        local n = before - inv.get_item_count(want)
+        if ok and n > 0 then
+          deposited[want] = (deposited[want] or 0) + n
+          remaining = remaining - n
         end
       end
     end
     if not next(deposited) then
-      return false, "deposit_to_chest: couldn't deposit " .. tostring(p.count) .. " " .. want
+      return false, "batch_insert: couldn't deposit " .. tostring(p.count) .. " " .. want
         .. " (not in inventory or chests full)"
     end
     local parts0 = {}
@@ -908,14 +937,15 @@ local function skill_deposit_to_chest(character, p)
     if excess > 0 then
       for _, chest in ipairs(chests) do
         if chest.valid then
-          local ci = chest.get_inventory(defines.inventory.chest)
-          if ci then
-            local n = ci.insert{name = name, count = excess}
-            if n > 0 then
-              inv.remove{name = name, count = n}
-              deposited[name] = (deposited[name] or 0) + n
-              excess = excess - n
-            end
+          local before = inv.get_item_count(name)
+          local ok = AIActions.run(character, {
+            action = "insert", item = name, count = excess,
+            position = chest.position, radius = 1, inventory = "chest",
+          })
+          local n = before - inv.get_item_count(name)
+          if ok and n > 0 then
+            deposited[name] = (deposited[name] or 0) + n
+            excess = excess - n
           end
         end
         if excess <= 0 then break end
@@ -924,7 +954,7 @@ local function skill_deposit_to_chest(character, p)
   end
 
   if not next(deposited) then
-    return false, "deposit_to_chest: nothing deposited (nothing exceeds keep=" .. keep .. " or chests full)"
+    return false, "batch_insert: nothing deposited (nothing exceeds keep=" .. keep .. " or chests full)"
   end
   local parts = {}
   for name, count in pairs(deposited) do parts[#parts + 1] = count .. "x " .. name end
@@ -932,18 +962,52 @@ local function skill_deposit_to_chest(character, p)
   return true, "deposited " .. table.concat(parts, ", ")
 end
 
+-- Insert is the single batch counterpart of the insert atomic. `mode=deposit`
+-- selects chest deposit; otherwise the default is smart machine refill.
+local function batch_action_insert(character, p)
+  local mode = tostring(p.mode or ""):lower()
+  if mode == "deposit" or p.keep ~= nil then
+    return batch_action_deposit_to_chest(character, p)
+  end
+  return batch_action_fill(character, p)
+end
+
 -- -------------------------------------------------------------------------
--- build_ghosts() — build the human's placed entity-ghosts (validated mechanic).
--- Highest-priority skill: ghosts are explicit human intent.
+-- batch_build_ghost() — build the human's placed entity-ghosts (validated mechanic).
+-- Highest-priority batch action: ghosts are explicit human intent.
 -- -------------------------------------------------------------------------
-local function skill_build_ghosts(character, _)
+local function batch_action_build_ghosts(character, p)
+  p = p or {}
   local surface = character.surface
   local inv = inv_of(character)
-  -- Search the ENTIRE surface — ghosts may be far from the character's current
-  -- position (e.g. an oil outpost blueprinted 200+ tiles away). We teleport to
-  -- the nearest ghost cluster before attempting revive.
-  local ghosts = surface.find_entities_filtered{type = "entity-ghost"}
-  if #ghosts == 0 then return false, "build_ghosts: no ghosts on surface to build" end
+  -- Scope the broad path so a batch never consumes unrelated ghosts belonging
+  -- to another plan or another agent. With no scope, retain the historical
+  -- whole-surface behavior for explicitly requested broad construction.
+  local filter = {type = "entity-ghost", force = character.force}
+  local scope = "surface"
+  local a = p.area
+  if type(a) == "table" then
+    local lt = a.left_top or a[1]
+    local rb = a.right_bottom or a[2]
+    if lt and rb and tonumber(lt.x) and tonumber(lt.y) and tonumber(rb.x) and tonumber(rb.y) then
+      filter.area = {{tonumber(lt.x), tonumber(lt.y)}, {tonumber(rb.x), tonumber(rb.y)}}
+      scope = string.format("area {%g,%g}-{%g,%g}", tonumber(lt.x), tonumber(lt.y), tonumber(rb.x), tonumber(rb.y))
+    elseif tonumber(a.x) and tonumber(a.y) and tonumber(a.width) and tonumber(a.height) then
+      local w, h = tonumber(a.width), tonumber(a.height)
+      filter.area = {{a.x - w / 2, a.y - h / 2}, {a.x + w / 2, a.y + h / 2}}
+      scope = string.format("area {%g,%g}+{%g,%g}", tonumber(a.x), tonumber(a.y), w, h)
+    else
+      return false, "batch_build_ghost: area needs left_top/right_bottom or x,y,width,height"
+    end
+  elseif p.position or (p.x ~= nil and p.y ~= nil) then
+    local pos = p.position or {x = tonumber(p.x), y = tonumber(p.y)}
+    local radius = math.min(tonumber(p.radius) or 96, 1000)
+    filter.position, filter.radius = pos, radius
+    scope = string.format("radius %g around {%g,%g}", radius, pos.x, pos.y)
+  end
+  if p.name and p.name ~= "" then filter.ghost_name = p.name end
+  local ghosts = surface.find_entities_filtered(filter)
+  if #ghosts == 0 then return false, "batch_build_ghost: no ghosts in " .. scope end
 
   -- Find nearest ghost so we can teleport to it.
   local nearest, nd = nil, math.huge
@@ -970,25 +1034,18 @@ local function skill_build_ghosts(character, _)
       local item = proto and proto.items_to_place_this and proto.items_to_place_this[1]
         and proto.items_to_place_this[1].name
       if item and inv.get_item_count(item) > 0 then
-        -- NB: do NOT teleport the character to the ghost first. Ghosts have no
-        -- collision box, so find_non_colliding_position returns the ghost's own
-        -- tile; teleporting there makes the CHARACTER block the spot and revive()
-        -- fails. revive() is a force-level op and needs no character reach.
-        local _, ent = g.revive{raise_revive = false}
-        if not (ent and ent.valid) then
-          -- The character may be standing ON this ghost (e.g. its home tile).
-          -- Step aside to a spot clear of the ghost footprint and retry once.
-          local aside = surface.find_non_colliding_position(
-            "character", {x = g.position.x + 3, y = g.position.y + 3}, 8, 0.5)
-          if aside then
-            character.teleport(aside)
-            _, ent = g.revive{raise_revive = false}
-          end
-        end
-        if ent and ent.valid then
-          inv.remove{name = item, count = 1}
+        local ghost_name = g.ghost_name
+        local pos = {x = g.position.x, y = g.position.y}
+        local ok = AIActions.run(character, {
+          action = "build_ghost", name = ghost_name, position = pos, radius = 0.4,
+        })
+        if ok then
+          local built_here = surface.find_entities_filtered{
+            name = ghost_name, position = pos, radius = 0.4, force = character.force,
+          }
+          local ent = built_here[1]
           built = built + 1
-          built_ents[#built_ents + 1] = ent
+          if ent and ent.valid then built_ents[#built_ents + 1] = ent end
         end
       elseif item then
         missing[item] = (missing[item] or 0) + 1
@@ -1000,32 +1057,32 @@ local function skill_build_ghosts(character, _)
   for it, c in pairs(missing) do parts[#parts + 1] = c .. "x " .. it end
   local detail = string.format("built %d ghost(s)", built)
   if #parts > 0 then detail = detail .. "; need items: " .. table.concat(parts, ", ") end
-  if built == 0 and #parts == 0 then return false, "build_ghosts: no buildable ghosts" end
+  if built == 0 and #parts == 0 then return false, "batch_build_ghost: no buildable ghosts" end
   -- Post-build review (mandatory): status buckets of everything just built,
-  -- problem entities listed; remember the batch as review_build's default.
+  -- problem entities listed; remember the batch as batch_review_build's default.
   if built > 0 then
     remember_build(character, built_ents)
-    detail = detail .. "; " .. audit_detail(audit_entities(built_ents))
+    detail = detail .. "; " .. audit_detail(audit_entities(character, built_ents))
   end
   return true, detail
 end
 
 -- -------------------------------------------------------------------------
--- deconstruct() — mine everything the human marked for deconstruction
--- (buildings, trees, rocks). SECOND priority after build_ghosts: a
+-- batch_mine() — mine everything the human marked for deconstruction
+-- (buildings, trees, rocks). SECOND priority after batch_build_ghost: a
 -- deconstruction mark is explicit human "remove this" intent, the mirror of a
 -- ghost. Unlike ghosts/ore, these targets HAVE collision, so teleporting
--- adjacent (the gather pattern) is safe — find_non_colliding_position lands the
+-- adjacent (the batch_mine pattern) is safe — find_non_colliding_position lands the
 -- character beside the target, not on it, and mine_entity collects the products.
 -- -------------------------------------------------------------------------
-local function skill_deconstruct(character, p)
+local function batch_action_deconstruct(character, p)
   local surface = character.surface
   local inv = inv_of(character)
   local radius = math.min(p.radius or 96, 200)
   local marked = surface.find_entities_filtered{
     to_be_deconstructed = true, position = character.position, radius = radius, limit = 100}
   if #marked == 0 then
-    return false, "deconstruct: nothing marked for deconstruction within " .. radius .. " tiles"
+    return false, "batch_mine: nothing marked for deconstruction within " .. radius .. " tiles"
   end
 
   -- Nearest-first so the character walks an efficient path and stays near base.
@@ -1044,7 +1101,9 @@ local function skill_deconstruct(character, p)
       else
         local sp = surface.find_non_colliding_position("character", m.position, 3, 0.5)
         if sp then character.teleport(sp) end
-        local ok = character.mine_entity(m, true)
+        local ok = AIActions.run(character, {
+          action = "mine", name = m.name, position = m.position, radius = 1,
+        })
         if ok and not m.valid then
           removed = removed + 1
         elseif m.valid then
@@ -1055,8 +1114,8 @@ local function skill_deconstruct(character, p)
   end
 
   if removed == 0 then
-    if skipped > 0 then return false, "deconstruct: marked objects can't be mined (unminable)" end
-    return false, "deconstruct: couldn't mine any marked object (inventory full?)"
+    if skipped > 0 then return false, "batch_mine: marked objects can't be mined (unminable)" end
+    return false, "batch_mine: couldn't mine any marked object (inventory full?)"
   end
   local detail = string.format("deconstructed %d marked object(s)", removed)
   if skipped > 0 then detail = detail .. string.format("; %d unminable skipped", skipped) end
@@ -1064,7 +1123,7 @@ local function skill_deconstruct(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- clear_area(area|position+radius, kinds?) — clear TERRAIN so a planned
+-- batch_mine(area|position+radius, kinds?) — clear TERRAIN so a planned
 -- layout can go down on flat ground. Authorized to act WITHOUT a human
 -- deconstruction mark, but strictly limited to natural obstacles: trees,
 -- minable rocks, and (reported-only) cliffs. Player-built entities are only
@@ -1073,7 +1132,34 @@ end
 -- (centred box), or position+radius. Bounded per call; re-run while
 -- remaining > 0.
 -- -------------------------------------------------------------------------
-local function skill_clear_area(character, p)
+local function batch_action_clear_area(character, p)
+  -- A file-backed cleanup may contain many regions. Process them through the
+  -- same bounded single-region operation so a large cleanup is resumable and
+  -- each region keeps the existing safety rules.
+  if type(p.areas) == "table" and #p.areas > 0 then
+    local details, cleared = {}, 0
+    for i, region in ipairs(p.areas) do
+      if type(region) ~= "table" then
+        details[#details + 1] = string.format("area #%d invalid", i)
+      else
+        local one = {}
+        for k, v in pairs(p) do if k ~= "areas" then one[k] = v end end
+        if region.area then
+          one.area = region.area
+        elseif region.position then
+          one.position, one.radius = region.position, region.radius
+        else
+          for k, v in pairs(region) do one[k] = v end
+        end
+        local ok, detail = batch_action_clear_area(character, one)
+        details[#details + 1] = string.format("area #%d: %s", i, detail or "")
+        if ok then cleared = cleared + 1 end
+      end
+    end
+    if cleared == 0 then return false, "batch_mine: no region cleared; " .. table.concat(details, " | ") end
+    return true, string.format("cleared %d/%d region(s); %s", cleared, #p.areas, table.concat(details, " | "))
+  end
+
   local surface = character.surface
   local inv = inv_of(character)
 
@@ -1083,7 +1169,7 @@ local function skill_clear_area(character, p)
     local a_lt = a.left_top or a[1]
     local a_rb = a.right_bottom or a[2]
     if not (a_lt and a_rb and a_lt.x and a_lt.y and a_rb.x and a_rb.y) then
-      return false, "clear_area: area needs {left_top={x,y}, right_bottom={x,y}}"
+      return false, "batch_mine: area needs {left_top={x,y}, right_bottom={x,y}}"
     end
     lt, rb = {x = tonumber(a_lt.x), y = tonumber(a_lt.y)}, {x = tonumber(a_rb.x), y = tonumber(a_rb.y)}
   elseif p.x ~= nil and p.y ~= nil then
@@ -1124,7 +1210,7 @@ local function skill_clear_area(character, p)
   local cliffs = #(surface.find_entities_filtered{area = area, type = "cliff"})
 
   if #targets == 0 then
-    local msg = "clear_area: nothing to clear in region"
+    local msg = "batch_mine: nothing to clear in region"
     if cliffs > 0 then msg = msg .. string.format(" (%d cliff(s) need cliff explosives)", cliffs) end
     return true, msg
   end
@@ -1144,7 +1230,9 @@ local function skill_clear_area(character, p)
     if m.valid then
       local sp = surface.find_non_colliding_position("character", m.position, 3, 0.5)
       if sp then character.teleport(sp) end
-      character.mine_entity(m, true)
+      AIActions.run(character, {
+        action = "mine", name = m.name, position = m.position, radius = 1,
+      })
       if not m.valid then
         removed = removed + 1
         by_kind[t.kind] = (by_kind[t.kind] or 0) + 1
@@ -1168,16 +1256,16 @@ local function skill_clear_area(character, p)
   end
 
   if removed == 0 then
-    return false, "clear_area: couldn't clear anything (inventory full? deposit_to_chest first)"
+    return false, "batch_mine: couldn't clear anything (inventory full? batch_insert first)"
   end
   local parts = {}
   for k, c in pairs(by_kind) do parts[#parts + 1] = c .. "x " .. k end
   table.sort(parts)
   local detail = string.format("cleared %d obstacle(s) (%s)", removed, table.concat(parts, ", "))
   if remaining > 0 then
-    detail = detail .. string.format("; %d remaining in region — run clear_area again", remaining)
+    detail = detail .. string.format("; %d remaining in region — run batch_mine again", remaining)
   end
-  if full then detail = detail .. " (stopped: inventory full — deposit_to_chest, then retry)" end
+  if full then detail = detail .. " (stopped: inventory full — batch_insert, then retry)" end
   if cliffs > 0 then
     detail = detail .. string.format("; %d cliff(s) untouched (need cliff explosives)", cliffs)
   end
@@ -1185,27 +1273,40 @@ local function skill_clear_area(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- plan_blueprint(entities, replace?) — lay down a WHOLE layout as entity
--- ghosts in one call: scan_area → plan → clear_area → plan_blueprint →
--- place_batch/build_ghosts. Each entry: {name="transport-belt", x=10, y=20,
+-- Mine is the single batch counterpart of the mine atomic. Select a workflow
+-- explicitly when the input is ambiguous: gather, deconstruct, or clear.
+local function batch_action_mine(character, p)
+  local mode = tostring(p.mode or ""):lower()
+  if mode == "gather" or (mode == "" and p.item and not p.area and p.x == nil and p.y == nil) then
+    return batch_action_gather(character, p)
+  end
+  if mode == "deconstruct" or p.marked == true then
+    return batch_action_deconstruct(character, p)
+  end
+  return batch_action_clear_area(character, p)
+end
+
+-- batch_create_ghost(entities, replace?) — lay down a WHOLE layout as entity
+-- ghosts in one call: scan_area → plan → batch_mine → batch_create_ghost →
+-- batch_build_ghost. Each entry: {name="transport-belt", x=10, y=20,
 -- direction="east"}. Coordinates follow the EXACT-coordinate contract (see
 -- aligned_position — rotation-aware, no snapping); misaligned entries are
 -- rejected with the nearest legal value. Ghost semantics match GUI
 -- blueprints (trees/ghost fields overlappable, water rejected). Nothing is
--- consumed — gather/craft happens when place_batch/build_ghosts executes
+-- consumed — batch_mine/craft happens when batch_build_ghost executes
 -- the plan.
 -- -------------------------------------------------------------------------
-local function skill_plan_blueprint(character, p)
+local function batch_action_plan_blueprint(character, p)
   local list = p.entities
   if type(list) ~= "table" or #list == 0 then
-    return false, "plan_blueprint: pass entities=[{name,x,y,direction?}, ...]"
+    return false, "batch_create_ghost: pass entities=[{name,x,y,direction?}, ...]"
   end
   if #list > 500 then
-    return false, "plan_blueprint: at most 500 entities per call (" .. #list .. " given)"
+    return false, "batch_create_ghost: at most 500 entities per call (" .. #list .. " given)"
   end
   local surface = character.surface
 
-  local placed, skipped = 0, {}
+  local placed, skipped, planned = 0, {}, {}
   for i, e in ipairs(list) do
     local name = type(e) == "table" and (e.name or e.item) or nil
     local x = type(e) == "table" and tonumber(e.x) or nil
@@ -1225,28 +1326,17 @@ local function skill_plan_blueprint(character, p)
       if not pos then
         reason = align_err
       else
-        -- Ghosts are free and reversible, and GUI blueprint stamping happily
-        -- overlaps trees and existing ghost fields — can_place_entity with
-        -- build_check_type=blueprint_ghost is STRICTER than actual ghost
-        -- placement (belt ghosts inside an existing ghost field — or over
-        -- trees, as GUI blueprints routinely do — report false while
-        -- create_entity succeeds). But create_entity is LOOSER in one way:
-        -- it will happily drop ghosts on WATER, which no GUI blueprint does.
-        -- So: guard the centre tile against water, then create directly and
-        -- let the engine's accept/reject be the verdict.
-        local tile = surface.get_tile(math.floor(pos.x), math.floor(pos.y))
-        if WATER_TILE_NAMES[tile.name] then
-          reason = string.format("blocked at {%.1f,%.1f} (water)", pos.x, pos.y)
+        local ok = AIActions.run(character, {
+          action = "create_ghost", name = name, position = pos, direction = e.direction,
+        })
+        if ok then
+          placed = placed + 1
+          local ghost = surface.find_entities_filtered{
+            type = "entity-ghost", ghost_name = name, position = pos, radius = 0.1, force = character.force,
+          }[1]
+          if ghost then planned[#planned + 1] = ghost end
         else
-          local ghost = surface.create_entity{
-            name = "entity-ghost", inner_name = name, position = pos,
-            direction = dir, force = character.force, expires = false,
-          }
-          if ghost and ghost.valid then
-            placed = placed + 1
-          else
-            reason = string.format("blocked at {%.1f,%.1f}", pos.x, pos.y)
-          end
+          reason = string.format("blocked at {%.1f,%.1f}", pos.x, pos.y)
         end
       end
     end
@@ -1264,153 +1354,50 @@ local function skill_plan_blueprint(character, p)
     end
   end
   if placed == 0 then
-    return false, "plan_blueprint: no ghosts placed — " .. detail
+    return false, "batch_create_ghost: no ghosts placed — " .. detail
   end
-  detail = detail .. " — run build_ghosts when you hold the items"
+  remember_plan(character, planned)
+  detail = detail .. " — run batch_build_ghost when you hold the items"
   return true, detail
 end
 
--- -------------------------------------------------------------------------
--- return_home() — walk back to the home anchor.
--- -------------------------------------------------------------------------
-local function skill_return_home(character, _)
-  local home = storage.ai_player and storage.ai_player.home_position
-  if not home then return false, "return_home: no home anchor set" end
-  local surface = character.surface
-  local sp = surface.find_non_colliding_position("character", {x = home.x, y = home.y}, 8, 0.5)
-  if not sp then return false, "return_home: home area is blocked" end
-  character.teleport(sp)
-  return true, string.format("returned home to {%d,%d}", home.x, home.y)
+local function batch_action_create_ghost(character, p)
+  if p.layout == "mining_outpost" then
+    if p.entities then return false, "batch_create_ghost: choose layout or entities" end
+    return batch_action_plan_mining_outpost(character, p)
+  end
+  if p.layout then return false, "batch_create_ghost: unknown layout " .. tostring(p.layout) end
+  return batch_action_plan_blueprint(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- research(tech?) — queue a technology on the AI force. WITHOUT this, a fed
--- lab does nothing: a separate force researches nothing unless something is
--- queued. Picks a sensible next tech if none is given.
+-- batch_build_ghost supports broad scopes and explicit ghost lists.
 -- -------------------------------------------------------------------------
-local PREFERRED_TECH = {
-  "automation", "electronics", "steel-processing", "logistics",
-  "fast-inserter", "logistic-science-pack",
-}
-
-local function prereqs_met(tech)
-  for _, pre in pairs(tech.prerequisites) do
-    if not pre.researched then return false end
-  end
-  return true
-end
-
--- A tech is QUEUEABLE only if it isn't a research_trigger tech (those are
--- completed by crafting/doing something, not by add_research) and add_research
--- actually accepts it. Returns true on success (it queues as a side effect).
-local function try_queue(force, tech)
-  if not (tech and tech.enabled and not tech.researched and prereqs_met(tech)) then return false end
-  if tech.prototype.research_trigger ~= nil then return false end
-  return force.add_research(tech)
-end
-
-local function skill_research(character, p)
-  local force = character.force
-  local named = p.tech or p.technology or p.name
-
-  if named then
-    -- A named technology must be honored idempotently; NEVER fall through to
-    -- the autopilot below (it would silently queue something else).
-    local t = force.technologies[named]
-    if not t then
-      return false, "research: unknown technology '" .. tostring(named) .. "'"
-    end
-    if t.researched then
-      return true, "research: '" .. named .. "' is already researched"
-    end
-    if force.current_research and force.current_research.name == named then
-      return true, "research: '" .. named .. "' is already in progress"
-    end
-    for _, qt in pairs(force.research_queue) do
-      if qt.name == named then
-        return true, "research: '" .. named .. "' is already queued"
-      end
-    end
-    if not t.enabled then
-      return false, "research: '" .. named .. "' is locked (prerequisites missing)"
-    end
-    if t.prototype.research_trigger ~= nil then
-      return false, "research: '" .. named .. "' is unlocked by a CRAFTING trigger, not queuing"
-    end
-    if force.add_research(t) then
-      return true, "queued research: " .. named .. " — feed a lab with science packs to progress"
-    end
-    return false, "research: could not queue '" .. named .. "'"
-  end
-
-  for _, name in ipairs(PREFERRED_TECH) do
-    if try_queue(force, force.technologies[name]) then
-      return true, "queued research: " .. name .. " — feed a lab with science packs to progress"
-    end
-  end
-  for _, t in pairs(force.technologies) do
-    if try_queue(force, t) then
-      return true, "queued research: " .. t.name .. " — feed a lab with science packs to progress"
-    end
-  end
-
-  -- Nothing queueable: the next research is likely a TRIGGER tech (Factorio 2.0
-  -- bootstraps via crafting, not queuing). Tell the model to craft the science.
-  for _, t in pairs(force.technologies) do
-    if t.enabled and not t.researched and prereqs_met(t) and t.prototype.research_trigger ~= nil then
-      return false, "research: '" .. t.name .. "' is unlocked by CRAFTING, not queuing — hand-craft "
-        .. "automation-science-pack (1 copper-plate + 1 iron-gear-wheel) to trigger it; then more tech becomes queueable"
-    end
-  end
-  return false, "research: nothing to queue right now"
-end
-
--- -------------------------------------------------------------------------
--- goto(position) — teleport the character to an arbitrary map coordinate.
--- Use when you need to reach a location before performing other actions
--- (e.g. inspecting a distant outpost or approaching a ghost cluster manually).
--- -------------------------------------------------------------------------
-local function skill_goto(character, p)
-  local pos = p.position
-  if (not pos or pos.x == nil or pos.y == nil) and p.x ~= nil and p.y ~= nil then
-    pos = {x = p.x, y = p.y}
-  end
-  if not pos or pos.x == nil or pos.y == nil then
-    return false, "goto: pass position={x,y} or flat x/y"
-  end
-  local surface = character.surface
-  local target = {x = tonumber(pos.x), y = tonumber(pos.y)}
-  local safe = surface.find_non_colliding_position("character", target, 5, 0.5) or target
-  character.teleport(safe)
-  return true, string.format("moved to (%.0f, %.0f)", safe.x, safe.y)
-end
-
--- -------------------------------------------------------------------------
--- place_batch(entities | use="last_plan") — PRECISE ghost executor: builds
--- ONLY the listed entities that already exist as ghosts (plan_blueprint or
--- plan_mining_outpost first). Nothing is built that wasn't ghosted, so
+-- batch_build_ghost(entities | use="last_plan") — PRECISE ghost executor: builds
+-- ONLY the listed entities that already exist as ghosts (batch_create_ghost or
+-- batch_create_ghost layout=mining_outpost first). Nothing is built that wasn't ghosted, so
 -- mixed-agent ghost fields stay untouched — this is the scoped alternative
--- to build_ghosts. Entries must match the ghost's exact aligned position
+-- to batch_build_ghost. Entries must match the ghost's exact aligned position
 -- (and direction when given); inventory is pre-checked ATOMICALLY (any
 -- shortage builds nothing). use="last_plan" executes the most recent
--- plan_mining_outpost of THIS character from the mod-side registry — no
+-- batch_create_ghost layout=mining_outpost of THIS character from the mod-side registry — no
 -- coordinates round-trip through the caller (cap 1000 there vs 500 for
 -- explicit lists). Ends with the post-build audit; the batch becomes
--- review_build's default.
+-- batch_review_build's default.
 -- -------------------------------------------------------------------------
-local function skill_place_batch(character, p)
+local function batch_action_place(character, p)
   local list = p.entities
   local use = tostring(p.use or ""):lower()
   if use ~= "" then
     if list ~= nil then
-      return false, "place_batch: pass either entities or use=last_plan, not both"
+      return false, "batch_build_ghost: pass either entities or use=last_plan, not both"
     end
     if use ~= "last_plan" then
-      return false, "place_batch: unknown use '" .. use .. "' (only last_plan)"
+      return false, "batch_build_ghost: unknown use '" .. use .. "' (only last_plan)"
     end
     local rec = storage.ai_last_plan and storage.ai_last_plan[character.unit_number]
     if not rec then
-      return false, "place_batch: no plan on record — run plan_mining_outpost first"
+      return false, "batch_build_ghost: no plan on record — run batch_create_ghost layout=mining_outpost first"
     end
     list = {}
     for _, g in ipairs(rec.entries) do
@@ -1419,15 +1406,15 @@ local function skill_place_batch(character, p)
       end
     end
     if #list == 0 then
-      return false, "place_batch: last plan has no live ghosts (all built or cleared?)"
+      return false, "batch_build_ghost: last plan has no live ghosts (all built or cleared?)"
     end
   end
   if type(list) ~= "table" or #list == 0 then
-    return false, "place_batch: pass entities=[{name,x,y,direction?}, ...] or use=last_plan"
+    return false, "batch_build_ghost: pass entities=[{name,x,y,direction?}, ...] or use=last_plan"
   end
   local cap = use ~= "" and 1000 or 500
   if #list > cap then
-    return false, "place_batch: at most " .. cap .. " entities per call (" .. #list .. " given)"
+    return false, "batch_build_ghost: at most " .. cap .. " entities per call (" .. #list .. " given)"
   end
   local inv = inv_of(character)
   local surface = character.surface
@@ -1454,7 +1441,7 @@ local function skill_place_batch(character, p)
           if g.valid then ghost = g break end
         end
         if not ghost then
-          reason = string.format("no %s ghost at {%.1f,%.1f} — plan_blueprint first", name, pos.x, pos.y)
+          reason = string.format("no %s ghost at {%.1f,%.1f} — batch_create_ghost first", name, pos.x, pos.y)
         elseif dir_given and ghost.direction ~= dir then
           reason = string.format("direction mismatch at {%.1f,%.1f} (ghost %d, asked %d)",
             pos.x, pos.y, ghost.direction, dir)
@@ -1479,48 +1466,54 @@ local function skill_place_batch(character, p)
     end
   end
   if #shortage > 0 then
-    return false, "place_batch: shortage — " .. table.concat(shortage, ", ") .. "; nothing placed"
+    return false, "batch_build_ghost: shortage — " .. table.concat(shortage, ", ") .. "; nothing placed"
   end
 
-  -- Pass 2: revive the matched ghosts (build_ghosts semantics).
+  -- Pass 2: revive the matched ghosts (batch_build_ghost semantics).
   local placed_ents = {}
   for i, en in ipairs(entries) do
-    local _, ent = en.ghost.revive{raise_revive = false}
-    if not (ent and ent.valid) then
-      -- The character may be standing ON this ghost — step aside, retry once.
-      local aside = surface.find_non_colliding_position(
-        "character", {x = en.ghost.position.x + 3, y = en.ghost.position.y + 3}, 8, 0.5)
-      if aside then
-        character.teleport(aside)
-        _, ent = en.ghost.revive{raise_revive = false}
-      end
-    end
-    if ent and ent.valid then
-      inv.remove{name = en.name, count = 1}
+    local pos = {x = en.ghost.position.x, y = en.ghost.position.y}
+    local ok = AIActions.run(character, {
+      action = "build_ghost", name = en.name, position = pos, radius = 0.4,
+    })
+    local built_here = surface.find_entities_filtered{
+      name = en.name, position = pos, radius = 0.4, force = character.force,
+    }
+    local ent = built_here[1]
+    if ok and ent and ent.valid then
       placed_ents[#placed_ents + 1] = ent
     else
       skipped[#skipped + 1] = {index = i, name = en.name,
         reason = string.format("revive failed at ghost {%.1f,%.1f}",
-          en.ghost.position.x, en.ghost.position.y)}
+          pos.x, pos.y)}
     end
   end
 
   if #placed_ents == 0 then
-    return false, "place_batch: nothing placed — " .. format_skipped(skipped)
+    return false, "batch_build_ghost: nothing placed — " .. format_skipped(skipped)
   end
   remember_build(character, placed_ents)
   local detail = string.format("placed %d; skipped %d", #placed_ents, #skipped)
   if #skipped > 0 then detail = detail .. " " .. format_skipped(skipped) end
-  return true, detail .. "; " .. audit_detail(audit_entities(placed_ents))
+  return true, detail .. "; " .. audit_detail(audit_entities(character, placed_ents))
+end
+
+-- One public batch build action supports both broad scopes and explicit
+-- entities/last_plan. The two execution paths share the build_ghost atomic.
+local function batch_action_build_ghost(character, p)
+  if p.entities ~= nil or p.use ~= nil then
+    return batch_action_place(character, p)
+  end
+  return batch_action_build_ghosts(character, p)
 end
 
 -- -------------------------------------------------------------------------
--- review_build(area | x,y+radius | last batch) — commissioning audit AFTER a
+-- batch_review_build(area | x,y+radius | last batch) — commissioning audit AFTER a
 -- build: statuses of every allied entity in scope, problem entities listed
 -- (no_power / no_fuel / flipped inserter …), leftover unbuilt ghosts counted.
--- Defaults to this character's last place_batch / build_ghosts batch.
+-- Defaults to this character's last batch_build_ghost batch.
 -- -------------------------------------------------------------------------
-local function skill_review_build(character, p)
+local function batch_action_review_build(character, p)
   local surface = character.surface
   local ents, scope
 
@@ -1548,7 +1541,7 @@ local function skill_review_build(character, p)
   else
     local last = storage.ai_last_build and storage.ai_last_build[character.unit_number]
     if not last then
-      return false, "review_build: pass area={x,y,width,height} or x/y(+radius); no previous batch on record"
+      return false, "batch_review_build: pass area={x,y,width,height} or x/y(+radius); no previous batch on record"
     end
     ents = {}
     for _, rec in ipairs(last.entries) do
@@ -1561,20 +1554,20 @@ local function skill_review_build(character, p)
     scope = string.format("last batch @tick %d (%d entries)", last.tick, #last.entries)
   end
 
-  local audit = audit_entities(ents)
+  local audit = audit_entities(character, ents)
   if audit.total == 0 then
-    return false, "review_build: nothing to audit in " .. scope
+    return false, "batch_review_build: nothing to audit in " .. scope
   end
   return #audit.problems == 0, scope .. "; " .. audit_detail(audit)
 end
 
 -- -------------------------------------------------------------------------
--- clear_ghosts(area | x,y+radius | name?) — batch-remove entity ghosts
+-- batch_remove_ghost(area | x,y+radius | name?) — batch-remove entity ghosts
 -- (blueprint leftovers, mis-planned layouts). Scope: explicit area, or
 -- x/y+radius, or radius (default 96) around the character. Optional `name`
 -- filters by ghost entity name. Never touches real buildings.
 -- -------------------------------------------------------------------------
-local function skill_clear_ghosts(character, p)
+local function batch_action_clear_ghosts(character, p)
   local surface = character.surface
   local filter = {type = "entity-ghost", force = character.force}
   local scope
@@ -1598,49 +1591,64 @@ local function skill_clear_ghosts(character, p)
   local ghosts = surface.find_entities_filtered(filter)
   local n = 0
   for _, g in ipairs(ghosts) do
-    if g.valid then g.destroy(); n = n + 1 end
+    if g.valid then
+      local ok = AIActions.run(character, {
+        action = "remove_ghost", name = g.ghost_name, position = g.position, radius = 0.4,
+      })
+      if ok then n = n + 1 end
+    end
   end
-  if n == 0 then return false, "clear_ghosts: no ghosts in " .. scope end
+  if n == 0 then return false, "batch_remove_ghost: no ghosts in " .. scope end
   return true, string.format("cleared %d ghost(s) in %s", n, scope)
+end
+
+local function batch_action_remove_ghost(character, p)
+  return batch_action_clear_ghosts(character, p)
+end
+
+local function batch_action_pickup(character, p)
+  local limit = math.min(tonumber(p.count) or 100, 500)
+  local picked = 0
+  for _ = 1, limit do
+    local ok = AIActions.run(character, {
+      action = "pickup", position = p.position, radius = p.radius or 3,
+    })
+    if not ok then break end
+    picked = picked + 1
+  end
+  if picked == 0 then return false, "batch_pickup: no loose ground items in range" end
+  return true, string.format("picked up %d ground stack(s)", picked)
 end
 
 -- -------------------------------------------------------------------------
 -- Registry + required params (mirrored in the bridge router prompt/validation)
 -- -------------------------------------------------------------------------
-AISkills.REGISTRY = {
-  build_ghosts     = skill_build_ghosts,
-  deconstruct      = skill_deconstruct,
-  clear_area       = skill_clear_area,
-  plan_blueprint   = skill_plan_blueprint,
-  place_batch      = skill_place_batch,
-  review_build     = skill_review_build,
-  clear_ghosts     = skill_clear_ghosts,
-  plan_mining_outpost = skill_plan_mining_outpost,
-  gather           = skill_gather,
-  fill             = skill_fill,
-  collect          = skill_collect,
-  deposit_to_chest = skill_deposit_to_chest,
-  return_home      = skill_return_home,
-  research         = skill_research,
-  ["goto"]         = skill_goto,
+AIBatchActions.REGISTRY = {
+  batch_build_ghost      = batch_action_build_ghost,
+  batch_mine             = batch_action_mine,
+  batch_create_ghost     = batch_action_create_ghost,
+  batch_review_build     = batch_action_review_build,
+  batch_remove_ghost     = batch_action_remove_ghost,
+  batch_insert           = batch_action_insert,
+  batch_take             = batch_action_collect,
+  batch_pickup           = batch_action_pickup,
 }
 
 -- -------------------------------------------------------------------------
--- Unified executor: a response entry is either a skill {skill=...} or a
--- primitive {action=...}. Dispatch each, collect E1 results.
+-- Unified executor: every response entry uses {action=...}. Dispatch each
+-- batch or atomic action and collect E1 results.
 -- -------------------------------------------------------------------------
--- Run a single entry. EVERY entry is an ACTION: compound actions (formerly
--- "skills") live in AISkills.REGISTRY, atomic actions in AIActions. The
--- "action" key dispatches both; the legacy "skill" key remains an alias for
--- compound actions. Returns (ok, detail, label) with error isolation.
+-- Run a single entry.
+-- Batch actions live in AIBatchActions.REGISTRY, atomic actions in AIActions.
+-- The single "action" key dispatches both kinds with error isolation.
 local function run_entry(character, entry)
   local ok, detail, label
-  local compound = entry.skill
-    or (entry.action and AISkills.REGISTRY[entry.action] and entry.action)
-    or nil
+  local requested = entry.action
+  local canonical = AIBatchActions.canonical(requested)
+  local compound = entry.action and AIBatchActions.REGISTRY[canonical] and canonical or nil
   if compound then
     label = "action:" .. tostring(compound)
-    local handler = AISkills.REGISTRY[compound]
+    local handler = AIBatchActions.REGISTRY[compound]
     if handler then
       local call_ok, rok, rdetail = pcall(handler, character, entry)
       if not call_ok then ok, detail = false, "error: " .. tostring(rok)
@@ -1658,7 +1666,7 @@ local function run_entry(character, entry)
   return (ok ~= false), detail, label
 end
 
-function AISkills.execute(character, entries)
+function AIBatchActions.execute(character, entries)
   if not character or not character.valid then return end
   local results = {}
   for _, entry in ipairs(entries) do
@@ -1671,7 +1679,7 @@ end
 -- Single-entry runner for external (RCON/remote) callers. Same dispatch and
 -- error isolation as execute(), but returns (ok, detail) directly instead of
 -- recording into memory. Used by the "ai_player" remote interface (control.lua).
-function AISkills.run(character, entry)
+function AIBatchActions.run(character, entry)
   if not character or not character.valid then
     return false, "no valid character"
   end
@@ -1679,4 +1687,4 @@ function AISkills.run(character, entry)
   return ok, detail or ""
 end
 
-return AISkills
+return AIBatchActions

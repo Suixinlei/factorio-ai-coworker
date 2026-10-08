@@ -1,6 +1,6 @@
 # Factorio AI Coworker
 
-Factorio AI Coworker (AI 协作者) is an open-source toolkit for building and coordinating AI-controlled players in Factorio. It combines an in-game mod with a small, one-shot RCON CLI so agents can inspect the world, keep stable player identities, and execute bounded skills, primitives, and queries.
+Factorio AI Coworker (AI 协作者) is an open-source toolkit for building and coordinating AI-controlled players in Factorio. It combines an in-game mod with a small, one-shot RCON CLI so agents can inspect the world, keep stable player identities, and execute bounded batch actions, atomic actions, and queries.
 
 The project is **inspired by [ai-player-v3](https://github.com/Suixinlei/factorio-ai-player-workspace)** and uses `ai-coworker` as the Factorio mod name and repository name. The project name is `factorio-ai-coworker`; the earlier project is credited as inspiration.
 
@@ -8,7 +8,7 @@ The project is **inspired by [ai-player-v3](https://github.com/Suixinlei/factori
 
 ## What is included
 
-- `mod/`: the Factorio 2.0 mod with dynamic AI players, skills, primitives, queries, and annotations.
+- `mod/`: the Factorio 2.0 mod with dynamic AI players, batch actions, atomic actions, queries, and annotations.
 - `cli/`: an independent command-line client. Each invocation reads the current RCON settings and exits after one operation.
 - `skills/`: operating rules and local headless-server guidance for AI agents.
 - `audits/`: reproducible end-to-end verification notes and scripts.
@@ -35,7 +35,7 @@ Then run commands from the repository root:
 .venv/bin/python -m cli --agent-id builder query get_recipe \
   --params '{"name":"iron-gear-wheel"}'
 .venv/bin/python -m cli --agent-id builder step \
-  '[{"action":"gather","item":"iron-ore","count":50}]'
+  '[{"action":"batch_mine","item":"iron-ore","count":50}]'
 ```
 
 Use [`cli/README.md`](cli/README.md) for the complete command reference. Never commit real credentials; `.env` files and local server data are ignored by Git.
@@ -46,7 +46,7 @@ Run `./scripts/local-headless.sh` to package the current `mod/` tree and start a
 
 ## Safety model
 
-Agent operations are deliberately bounded. Skills and primitives are allow-listed, queries return structured data, and the CLI requires an explicit `agent_id` for player-scoped actions. Review [`skills/factorio-ai-coworker/SKILL.md`](skills/factorio-ai-coworker/SKILL.md) before connecting an agent to a live server.
+Agent operations are deliberately bounded. Batch actions and atomic actions are allow-listed, queries return structured data, and the CLI requires an explicit `agent_id` for player-scoped actions. Review [`skills/factorio-ai-coworker/SKILL.md`](skills/factorio-ai-coworker/SKILL.md) before connecting an agent to a live server.
 
 ## Publish to the Factorio Mod Portal
 

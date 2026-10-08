@@ -28,7 +28,13 @@ EOF
 MOD_VERSION="$(sed -n 's/.*"version": *"\(.*\)".*/\1/p' "$ROOT/mod/info.json" | head -1)"
 MOD_ZIP="$MODS_DIR/ai-coworker_$MOD_VERSION.zip"
 STAGING="$SERVER_DIR/.mod-staging"
-rm -f "$MODS_DIR"/ai-coworker_*.zip
+python3 - "$MODS_DIR" <<'PYMOD'
+import sys
+from pathlib import Path
+for pattern in ("ai-coworker_*.zip", "ai-player-v3_*.zip"):
+    for path in Path(sys.argv[1]).glob(pattern):
+        path.unlink()
+PYMOD
 rm -rf "$STAGING"
 mkdir -p "$STAGING/ai-coworker_$MOD_VERSION"
 cp -R "$ROOT/mod/" "$STAGING/ai-coworker_$MOD_VERSION/"
@@ -45,7 +51,19 @@ echo "Packed mod: $MOD_ZIP"
 # on machines without a GUI client install.
 CLIENT_MODS="$HOME/Library/Application Support/factorio/mods"
 if [[ -d "$CLIENT_MODS" ]]; then
-  rm -f "$CLIENT_MODS"/ai-coworker_*.zip
+  python3 - "$CLIENT_MODS" <<'PYCLIENT'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+for pattern in ("ai-coworker_*.zip", "ai-player-v3_*.zip"):
+    for path in root.glob(pattern):
+        path.unlink()
+path = root / "mod-list.json"
+value = json.loads(path.read_text()) if path.exists() else {"mods": []}
+value["mods"] = [m for m in value["mods"] if m["name"] not in {"ai-player-v3", "ai-coworker"}]
+value["mods"].append({"name": "ai-coworker", "enabled": True})
+path.write_text(json.dumps(value, indent=2) + "\n")
+PYCLIENT
   cp "$MOD_ZIP" "$CLIENT_MODS/"
   echo "Synced mod to GUI client: $CLIENT_MODS/ai-coworker_$MOD_VERSION.zip"
 else

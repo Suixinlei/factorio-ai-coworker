@@ -1,5 +1,5 @@
 -- Read-only world/prototype queries for external callers (the MCP server via
--- the "ai_player" remote interface; see control.lua). Where skills DO things,
+-- the "ai_player" remote interface; see control.lua). Where batch actions DO things,
 -- queries only LOOK — none of these mutate game state.
 --
 -- Each query gets (ctx, params):
@@ -273,7 +273,7 @@ end
 
 -- -------------------------------------------------------------------------
 -- can_place — would a manual build of `entity` at {x,y} succeed? Runs the SAME
--- checks the place primitive uses (special cases like offshore-pump-on-water
+-- checks the place atomic action uses (special cases like offshore-pump-on-water
 -- and drill-on-resource, then the authoritative manual build check), so a
 -- can_place=true here means a subsequent place_entity will not be rejected.
 -- -------------------------------------------------------------------------

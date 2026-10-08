@@ -3,10 +3,10 @@ require('scripts.agents')
 require('scripts.character')
 require('scripts.registry')
 require('scripts.perception')
-require('scripts.primitives')
+require('scripts.atomic_actions')
 require('scripts.queries')
 require('scripts.brain')
-require('scripts.skills')
+require('scripts.batch_actions')
 
 local function annotation_text(value, fallback, field)
   if value == nil then return fallback end
@@ -269,8 +269,8 @@ local function refresh_registry(p)
     AIRegistry.reconcile(p.character.surface, p.character.force)
   end
 end
-local BLOCKED_SKILLS = {}
-local BLOCKED_ACTIONS = {destroy=true}
+local BLOCKED_BATCH_ACTIONS = {}
+local BLOCKED_ATOMIC_ACTIONS = {destroy=true}
 remote.add_interface('ai_player', {
   create_agent = create,
   spawn_agent = spawn,
@@ -302,24 +302,28 @@ remote.add_interface('ai_player', {
     return AIAgents.with(id, function() return AIQueries.run(name, params or {}) end)
   end,
   list_queries = function() return AIQueries.list() end,
-  list_skills = function()
+  list_batch_actions = function()
     local names={}
-    for n in pairs(AISkills.REGISTRY) do if not BLOCKED_SKILLS[n] then names[#names+1]=n end end
+    for n in pairs(AIBatchActions.REGISTRY) do if not BLOCKED_BATCH_ACTIONS[n] then names[#names+1]=n end end
     table.sort(names); return names
   end,
-  run_skill = function(id, skill, params)
-    if BLOCKED_SKILLS[skill] then return {ok=false, detail='destructive skill disabled'} end
+  list_atomic_actions = function() return AIActions.list() end,
+  run_batch_action = function(id, action, params)
+    if not AIBatchActions.REGISTRY[action] then return {ok=false, detail='unknown batch action: '..tostring(action)} end
+    if BLOCKED_BATCH_ACTIONS[action] then return {ok=false, detail='destructive batch action disabled'} end
     return AIAgents.with(id, function(p)
       if not p.character or not p.character.valid then return {ok=false, detail='character is not alive'} end
-      local entry = params or {}; entry.skill=skill
-      local ok, detail = AISkills.run(p.character,entry)
+      local entry = {}
+      for k, v in pairs(params or {}) do entry[k] = v end
+      entry.action = action
+      local ok, detail = AIBatchActions.run(p.character,entry)
       markers(p)
       return {ok=ok, detail=detail or '', agent_id=id, tick=game.tick}
     end)
   end,
-  run_primitive = function(id, action)
+  run_atomic_action = function(id, action)
     if type(action)~='table' or not action.action then return {ok=false, detail='action required'} end
-    if BLOCKED_ACTIONS[action.action] then return {ok=false, detail='destructive action disabled'} end
+    if BLOCKED_ATOMIC_ACTIONS[action.action] then return {ok=false, detail='destructive atomic action disabled'} end
     return AIAgents.with(id, function(p)
       if not p.character or not p.character.valid then return {ok=false, detail='character is not alive'} end
       local ok, detail=AIActions.run(p.character,action)

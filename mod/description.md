@@ -1,6 +1,6 @@
 # Factorio AI Coworker
 
-Factorio AI Coworker adds persistent, independently controllable AI player characters to Factorio 2.0. The companion CLI communicates with the mod over RCON and exposes bounded skills, primitives, queries, and map annotations for cooperative automation.
+Factorio AI Coworker adds persistent, independently controllable AI player characters to Factorio 2.0. The companion CLI communicates with the mod over RCON and exposes bounded batch actions, atomic actions, queries, and map annotations for cooperative automation.
 
 ![Codex, Claude Code, and OpenCode connect through the CLI and RCON to coordinate Factorio AI players](https://raw.githubusercontent.com/Suixinlei/factorio-ai-coworker/main/mod/assets/ai-coworker-cli-rcon-demo.png)
 

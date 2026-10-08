@@ -213,6 +213,25 @@ local function action_move(character, action)
   debug_print(string.format("Moved %s to {%.1f, %.1f}", action.direction, best.x, best.y))
 end
 
+local function action_goto(character, action)
+  local pos = action.position
+  if action.home then
+    local home = storage.ai_player and storage.ai_player.home_position
+    if not home then return false, "goto: no home anchor set" end
+    pos = home
+  end
+  if (not pos or pos.x == nil or pos.y == nil) and action.x ~= nil and action.y ~= nil then
+    pos = {x = action.x, y = action.y}
+  end
+  if not pos or pos.x == nil or pos.y == nil then
+    return false, "goto: pass position={x,y}, flat x/y, or home=true"
+  end
+  local target = {x = tonumber(pos.x), y = tonumber(pos.y)}
+  local safe = character.surface.find_non_colliding_position("character", target, 5, 0.5) or target
+  character.teleport(safe)
+  return true, string.format("moved to (%.0f, %.0f)", safe.x, safe.y)
+end
+
 local function action_mine(character, action)
   local surface = character.surface
   local target = find_entity(surface, action, character.position)
@@ -278,7 +297,7 @@ local function placement_problem(surface, item_name, position)
 end
 
 -- Exported for AIQueries.can_place, so the read-only placement check runs the
--- SAME special-case rules as the place primitive (single source of truth).
+-- SAME special-case rules as the place atomic action (single source of truth).
 AIActions.placement_problem = placement_problem
 AIActions.DIRECTION_MAP = DIRECTION_MAP
 
@@ -338,6 +357,103 @@ local function action_place(character, action)
   return false, "place: failed to create " .. (item_name or "?")
 end
 
+-- Build one existing entity ghost. Batch build actions use this atomic action so
+-- ghost matching, material consumption, revive retries, and error reporting
+-- stay in one place.
+local function action_build_ghost(character, action)
+  if not action.name or not action.position then
+    return false, "build_ghost: missing name or position"
+  end
+  local surface = character.surface
+  local ghosts = surface.find_entities_filtered{
+    type = "entity-ghost", ghost_name = action.name,
+    position = action.position, radius = action.radius or 0.4,
+    force = character.force,
+  }
+  local ghost = ghosts[1]
+  if not ghost or not ghost.valid then
+    return false, string.format("build_ghost: no %s ghost at {%.1f,%.1f}",
+      action.name, action.position.x, action.position.y)
+  end
+  local proto = prototypes.entity[action.name]
+  local item = proto and proto.items_to_place_this and proto.items_to_place_this[1]
+    and proto.items_to_place_this[1].name
+  local inv = character.get_inventory(defines.inventory.character_main)
+  if not item or not inv or inv.get_item_count(item) < 1 then
+    return false, "build_ghost: missing " .. tostring(item or action.name)
+  end
+  local pos = {x = ghost.position.x, y = ghost.position.y}
+  local _, entity = ghost.revive{raise_revive = false}
+  if not (entity and entity.valid) then
+    local aside = surface.find_non_colliding_position(
+      "character", {x = pos.x + 3, y = pos.y + 3}, 8, 0.5)
+    if aside then
+      character.teleport(aside)
+      _, entity = ghost.revive{raise_revive = false}
+    end
+  end
+  if not (entity and entity.valid) then
+    return false, string.format("build_ghost: revive failed at {%.1f,%.1f}", pos.x, pos.y)
+  end
+  inv.remove{name = item, count = 1}
+  return true, string.format("built %s at {%.1f,%.1f}", action.name, pos.x, pos.y)
+end
+
+local function action_create_ghost(character, action)
+  if not action.name or not action.position then
+    return false, "create_ghost: missing name or position"
+  end
+  if not prototypes.entity[action.name] then
+    return false, "create_ghost: unknown entity '" .. tostring(action.name) .. "'"
+  end
+  local tile = character.surface.get_tile(math.floor(action.position.x), math.floor(action.position.y))
+  local water = {
+    water = true, deepwater = true, ["water-green"] = true,
+    ["deepwater-green"] = true, ["water-shallow"] = true, ["water-mud"] = true,
+  }
+  if water[tile.name] then return false, "create_ghost: target tile is water" end
+  local dir = type(action.direction) == "number" and action.direction
+    or action.direction and DIRECTION_MAP[tostring(action.direction):lower()]
+    or defines.direction.north
+  local ghost = character.surface.create_entity{
+    name = "entity-ghost", inner_name = action.name,
+    position = action.position, direction = dir,
+    force = character.force, expires = false,
+  }
+  if not ghost or not ghost.valid then return false, "create_ghost: engine rejected placement" end
+  return true, string.format("created %s ghost at {%.1f,%.1f}", action.name, action.position.x, action.position.y)
+end
+
+local function action_remove_ghost(character, action)
+  if not action.position then return false, "remove_ghost: missing position" end
+  local ghosts = character.surface.find_entities_filtered{
+    type = "entity-ghost", position = action.position,
+    ghost_name = action.name,
+    radius = action.radius or 0.4, force = character.force,
+  }
+  local ghost = ghosts[1]
+  if not ghost or not ghost.valid then return false, "remove_ghost: no ghost at target" end
+  local name = ghost.ghost_name
+  ghost.destroy()
+  return true, "removed ghost " .. tostring(name)
+end
+
+-- Inspect one built entity; batch_review_build aggregates these records.
+local function action_review_build(character, action)
+  if not action.position then return false, "review_build: missing position" end
+  local entity = find_entity(character.surface, action, character.position, function(e)
+    return e.force == character.force and e.type ~= "entity-ghost"
+      and e.type ~= "resource" and e.type ~= "tree" and e.type ~= "simple-entity"
+  end)
+  if not entity then return false, "review_build: no built entity at target" end
+  local status = AIPerception.status_string(entity) or "normal"
+  local problem = AIPerception.PROBLEM_STATUS[status] == true
+  local record = {name = entity.name, position = {x = entity.position.x, y = entity.position.y},
+    status = status, problem = problem}
+  local detail = string.format("%s@%g,%g %s", entity.name, entity.position.x, entity.position.y, status)
+  return not problem, detail, record
+end
+
 local function action_set_recipe(character, action)
   if not action.position or not action.recipe then
     return false, "set_recipe: missing position or recipe"
@@ -370,6 +486,53 @@ local function action_craft(character, action)
   end
   return false, string.format(
     "craft: cannot hand-craft %s — missing ingredients or recipe not available", action.recipe)
+end
+
+local PREFERRED_TECH = {
+  "automation", "electronics", "steel-processing", "logistics",
+  "fast-inserter", "logistic-science-pack",
+}
+
+local function prereqs_met(tech)
+  for _, pre in pairs(tech.prerequisites) do
+    if not pre.researched then return false end
+  end
+  return true
+end
+
+local function try_queue(force, tech)
+  if not (tech and tech.enabled and not tech.researched and prereqs_met(tech)) then return false end
+  if tech.prototype.research_trigger ~= nil then return false end
+  return force.add_research(tech)
+end
+
+local function action_research(character, action)
+  local force = character.force
+  local named = action.tech or action.technology or action.name
+  if named then
+    local tech = force.technologies[named]
+    if not tech then return false, "research: unknown technology '" .. tostring(named) .. "'" end
+    if tech.researched then return true, "research: '" .. named .. "' is already researched" end
+    if force.current_research and force.current_research.name == named then
+      return true, "research: '" .. named .. "' is already in progress"
+    end
+    for _, queued in pairs(force.research_queue) do
+      if queued.name == named then return true, "research: '" .. named .. "' is already queued" end
+    end
+    if not tech.enabled then return false, "research: '" .. named .. "' is locked (prerequisites missing)" end
+    if tech.prototype.research_trigger ~= nil then
+      return false, "research: '" .. named .. "' is unlocked by a crafting trigger, not queuing"
+    end
+    if force.add_research(tech) then return true, "queued research: " .. named end
+    return false, "research: could not queue '" .. named .. "'"
+  end
+  for _, name in ipairs(PREFERRED_TECH) do
+    if try_queue(force, force.technologies[name]) then return true, "queued research: " .. name end
+  end
+  for _, tech in pairs(force.technologies) do
+    if try_queue(force, tech) then return true, "queued research: " .. tech.name end
+  end
+  return false, "research: nothing to queue right now"
 end
 
 local function action_insert(character, action)
@@ -477,21 +640,22 @@ local function action_pickup(character, action)
     position = pos,
     radius   = radius,
   }
-  local picked = 0
   local inv = character.get_inventory(defines.inventory.character_main)
-  for _, item_entity in ipairs(items) do
-    if item_entity.valid then
-      local stack = item_entity.stack
-      if inv and inv.can_insert(stack) then
-        inv.insert(stack)
-        item_entity.destroy()
-        picked = picked + 1
-      end
+  table.sort(items, function(a, b)
+    local ax, ay = a.position.x - character.position.x, a.position.y - character.position.y
+    local bx, by = b.position.x - character.position.x, b.position.y - character.position.y
+    return ax * ax + ay * ay < bx * bx + by * by
+  end)
+  local item_entity = items[1]
+  if item_entity and item_entity.valid then
+    local stack = item_entity.stack
+    if inv and inv.can_insert(stack) then
+      local count = stack.count
+      inv.insert(stack)
+      item_entity.destroy()
+      debug_print(string.format("Picked up 1 item stack (%d item(s))", count))
+      return true, string.format("picked up 1 ground stack (%d item(s))", count)
     end
-  end
-  debug_print(string.format("Picked up %d item(s)", picked))
-  if picked > 0 then
-    return true, string.format("picked up %d ground item(s)", picked)
   end
   return false, "pickup: no loose ground items in range"
 end
@@ -571,10 +735,16 @@ end
 
 local HANDLERS = {
   move         = action_move,
+  ["goto"]     = action_goto,
   mine         = action_mine,
   place        = action_place,
+  create_ghost = action_create_ghost,
+  build_ghost  = action_build_ghost,
+  remove_ghost = action_remove_ghost,
+  review_build = action_review_build,
   set_recipe   = action_set_recipe,
   craft        = action_craft,
+  research     = action_research,
   insert       = action_insert,
   take         = action_take,
   shoot        = action_shoot,
@@ -590,8 +760,15 @@ local HANDLERS = {
   wait         = function() debug_print("Waiting") end,
 }
 
--- Run ONE primitive action → (ok, detail). The unified executor
--- (AISkills.execute) calls this for {action=...} entries and collects the
+function AIActions.list()
+  local names = {}
+  for name in pairs(HANDLERS) do names[#names + 1] = name end
+  table.sort(names)
+  return names
+end
+
+-- Run ONE atomic action → (ok, detail). The unified executor
+-- (AIBatchActions.execute) calls this for {action=...} entries and collects the
 -- per-action results for the E1 feedback loop. Handlers that return nothing
 -- (move/chat/memory) count as ran (ok=true).
 function AIActions.run(character, action)
@@ -599,14 +776,14 @@ function AIActions.run(character, action)
   if not handler then
     return false, "unknown action '" .. tostring(action.action) .. "'"
   end
-  local call_ok, ok, detail = pcall(handler, character, action)
+  local call_ok, ok, detail, data = pcall(handler, character, action)
   if not call_ok then
     log_error(string.format("Action '%s': %s", tostring(action.action), tostring(ok)))
     return false, "error: " .. tostring(ok)
   end
   if ok == nil then ok = true end
   if ok == false and detail then debug_print(detail) end
-  return ok, detail
+  return ok, detail, data
 end
 
 return AIActions
