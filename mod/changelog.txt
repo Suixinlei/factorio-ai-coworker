@@ -1,3 +1,10 @@
+Version: 0.1.0
+Date: 2026-10-08
+
+  Initial public release of Factorio AI Coworker.
+  Includes the Factorio 2.0 runtime mod, bounded AI-player skills and queries,
+  RCON integration, and the companion CLI.
+
 Version: 0.8.5
 Date: 2026-10-08
 

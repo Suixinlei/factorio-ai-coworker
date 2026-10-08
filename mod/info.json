@@ -1,6 +1,6 @@
 {
   "name": "ai-coworker",
-  "version": "0.8.5",
+  "version": "0.1.0",
   "title": "Factorio AI Coworker (dynamic CLI roles)",
   "author": "Factorio AI Coworker contributors",
   "factorio_version": "2.0",
