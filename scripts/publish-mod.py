@@ -141,7 +141,13 @@ def main() -> int:
         },
     )
     upload_url = init.get("upload_url")
-    if not isinstance(upload_url, str) or not upload_url.startswith(MOD_PORTAL):
+    if not isinstance(upload_url, str):
+        raise SystemExit("Factorio API did not return a valid upload URL")
+    parsed_upload_url = urllib.parse.urlparse(upload_url)
+    upload_host = parsed_upload_url.hostname or ""
+    if parsed_upload_url.scheme != "https" or not (
+        upload_host == "mods.factorio.com" or upload_host.endswith(".mods.factorio.com")
+    ):
         raise SystemExit("Factorio API did not return a valid upload URL")
     result = publish(upload_url, artifact, description, args.source_url)
     print(json.dumps(result, ensure_ascii=False, indent=2))
