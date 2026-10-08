@@ -1,0 +1,424 @@
+{
+  "iron-ore": {
+    "found": true,
+    "resource": "iron-ore",
+    "tiles": 737,
+    "total_amount": 2970877,
+    "bounding_box": {
+      "left_top": {
+        "x": -47,
+        "y": 59
+      },
+      "right_bottom": {
+        "x": -15,
+        "y": 94
+      }
+    },
+    "nearest": {
+      "x": -24,
+      "y": 60
+    },
+    "nearest_distance": 31
+  },
+  "copper-ore": {
+    "found": true,
+    "resource": "copper-ore",
+    "tiles": 487,
+    "total_amount": 2650737,
+    "bounding_box": {
+      "left_top": {
+        "x": -9,
+        "y": 39
+      },
+      "right_bottom": {
+        "x": 19,
+        "y": 64
+      }
+    },
+    "nearest": {
+      "x": -1,
+      "y": 39
+    },
+    "nearest_distance": 0
+  },
+  "coal": {
+    "found": true,
+    "resource": "coal",
+    "tiles": 304,
+    "total_amount": 1444779,
+    "bounding_box": {
+      "left_top": {
+        "x": -21,
+        "y": 59
+      },
+      "right_bottom": {
+        "x": 0,
+        "y": 79
+      }
+    },
+    "nearest": {
+      "x": -6,
+      "y": 59
+    },
+    "nearest_distance": 20
+  },
+  "stone": {
+    "found": true,
+    "resource": "stone",
+    "tiles": 264,
+    "total_amount": 1030264,
+    "bounding_box": {
+      "left_top": {
+        "x": 12,
+        "y": 62
+      },
+      "right_bottom": {
+        "x": 32,
+        "y": 80
+      }
+    },
+    "nearest": {
+      "x": 18,
+      "y": 62
+    },
+    "nearest_distance": 29
+  },
+  "crude-oil": {
+    "found": false,
+    "resource": "crude-oil",
+    "radius": 128
+  },
+  "automation-science-pack": {
+    "name": "automation-science-pack",
+    "category": "crafting",
+    "energy": 5,
+    "ingredients": [
+      {
+        "name": "copper-plate",
+        "amount": 1,
+        "type": "item"
+      },
+      {
+        "name": "iron-gear-wheel",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "automation-science-pack",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": true,
+    "hand_craftable": true
+  },
+  "logistic-science-pack": {
+    "name": "logistic-science-pack",
+    "category": "crafting",
+    "energy": 6,
+    "ingredients": [
+      {
+        "name": "transport-belt",
+        "amount": 1,
+        "type": "item"
+      },
+      {
+        "name": "inserter",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "logistic-science-pack",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": true
+  },
+  "chemical-science-pack": {
+    "name": "chemical-science-pack",
+    "category": "crafting",
+    "energy": 24,
+    "ingredients": [
+      {
+        "name": "sulfur",
+        "amount": 1,
+        "type": "item"
+      },
+      {
+        "name": "advanced-circuit",
+        "amount": 3,
+        "type": "item"
+      },
+      {
+        "name": "engine-unit",
+        "amount": 2,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "chemical-science-pack",
+        "amount": 2,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": true
+  },
+  "rocket-silo": {
+    "name": "rocket-silo",
+    "category": "crafting",
+    "energy": 30,
+    "ingredients": [
+      {
+        "name": "steel-plate",
+        "amount": 1000,
+        "type": "item"
+      },
+      {
+        "name": "processing-unit",
+        "amount": 200,
+        "type": "item"
+      },
+      {
+        "name": "electric-engine-unit",
+        "amount": 200,
+        "type": "item"
+      },
+      {
+        "name": "pipe",
+        "amount": 100,
+        "type": "item"
+      },
+      {
+        "name": "concrete",
+        "amount": 1000,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "rocket-silo",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": true
+  },
+  "rocket-part": {
+    "name": "rocket-part",
+    "category": "rocket-building",
+    "energy": 3,
+    "ingredients": [
+      {
+        "name": "processing-unit",
+        "amount": 1,
+        "type": "item"
+      },
+      {
+        "name": "low-density-structure",
+        "amount": 1,
+        "type": "item"
+      },
+      {
+        "name": "rocket-fuel",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "rocket-part",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": false
+  },
+  "space-platform-starter-pack": {
+    "name": "space-platform-starter-pack",
+    "category": "crafting",
+    "energy": 60,
+    "ingredients": [
+      {
+        "name": "steel-plate",
+        "amount": 20,
+        "type": "item"
+      },
+      {
+        "name": "processing-unit",
+        "amount": 20,
+        "type": "item"
+      },
+      {
+        "name": "space-platform-foundation",
+        "amount": 60,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "space-platform-starter-pack",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": true
+  },
+  "processing-unit": {
+    "name": "processing-unit",
+    "category": "electronics-with-fluid",
+    "energy": 10,
+    "ingredients": [
+      {
+        "name": "electronic-circuit",
+        "amount": 20,
+        "type": "item"
+      },
+      {
+        "name": "advanced-circuit",
+        "amount": 2,
+        "type": "item"
+      },
+      {
+        "name": "sulfuric-acid",
+        "amount": 5,
+        "type": "fluid"
+      }
+    ],
+    "products": [
+      {
+        "name": "processing-unit",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": false
+  },
+  "low-density-structure": {
+    "name": "low-density-structure",
+    "category": "crafting",
+    "energy": 15,
+    "ingredients": [
+      {
+        "name": "copper-plate",
+        "amount": 20,
+        "type": "item"
+      },
+      {
+        "name": "steel-plate",
+        "amount": 2,
+        "type": "item"
+      },
+      {
+        "name": "plastic-bar",
+        "amount": 5,
+        "type": "item"
+      }
+    ],
+    "products": [
+      {
+        "name": "low-density-structure",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": true
+  },
+  "rocket-fuel": {
+    "name": "rocket-fuel",
+    "category": "organic-or-assembling",
+    "energy": 15,
+    "ingredients": [
+      {
+        "name": "solid-fuel",
+        "amount": 10,
+        "type": "item"
+      },
+      {
+        "name": "light-oil",
+        "amount": 10,
+        "type": "fluid"
+      }
+    ],
+    "products": [
+      {
+        "name": "rocket-fuel",
+        "amount": 1,
+        "type": "item"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": false
+  },
+  "basic-oil-processing": {
+    "name": "basic-oil-processing",
+    "category": "oil-processing",
+    "energy": 5,
+    "ingredients": [
+      {
+        "name": "crude-oil",
+        "amount": 100,
+        "type": "fluid"
+      }
+    ],
+    "products": [
+      {
+        "name": "petroleum-gas",
+        "amount": 45,
+        "type": "fluid"
+      }
+    ],
+    "enabled": false,
+    "hand_craftable": false
+  },
+  "assembly": {
+    "found": true,
+    "entity": "assembling-machine-1",
+    "position": {
+      "x": 48,
+      "y": 24
+    },
+    "distance": 0
+  },
+  "chemistry": {
+    "found": true,
+    "entity": "assembling-machine-1",
+    "position": {
+      "x": 64,
+      "y": -48
+    },
+    "distance": 0
+  },
+  "launch": {
+    "found": true,
+    "entity": "rocket-silo",
+    "position": {
+      "x": 112,
+      "y": -16
+    },
+    "distance": 0
+  },
+  "enemies": {
+    "count": 0,
+    "threat_level": "safe",
+    "composition": {
+      "units": 0,
+      "spawners": 0,
+      "worms": 0
+    },
+    "radius": 128,
+    "enemies": {}
+  }
+}

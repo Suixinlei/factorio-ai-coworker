@@ -1,0 +1,366 @@
+Version: 0.8.5
+Date: 2026-10-08
+
+  Features:
+    - place_batch use="last_plan": executes the most recent
+      plan_mining_outpost of this role WITHOUT re-sending coordinates. The
+      planner now records its placed ghosts in a per-character registry
+      (merged across extending re-runs; reviving/clearing a ghost drops its
+      ref, so the record always mirrors what is still unbuilt). The whole
+      plan -> gather/craft -> place_batch pipeline stays mixed-agent safe —
+      no whole-surface build_ghosts sweep needed. Shortage remains atomic;
+      explicit entities lists are unchanged (cap 500; last_plan allows 1000).
+
+Version: 0.8.4
+Date: 2026-10-08
+
+  Bugfixes:
+    - plan_mining_outpost now lists the EXACT entities occupying slots
+      (name@tile, capped at 5) in its OCCUPIED report — callers remove
+      precisely those instead of guessing with area heuristics (the E2E
+      heuristic destroyed nothing because occupied slots carry no ghost to
+      intersect against). Rocks stay clear_area's business.
+    - scripts/local-headless.sh starts the server detached via Python
+      start_new_session=True: the old nohup+& kept it in the caller's
+      process group, so harness process-tree reaping SIGTERMed the server
+      seconds into test runs that were started in the same invocation.
+
+Version: 0.8.3
+Date: 2026-10-08
+
+  Bugfixes:
+    - plan_mining_outpost hardening (E2E on the shared dev map, iron patch at
+      (57,36)): slots occupied by OTHER real buildings are skipped and
+      reported as OCCUPIED (no more dead ghosts that can never revive);
+      identical real entities count as "already built" and keep their row
+      alive; a re-run on a fully planned/built patch is a no-op success
+      instead of an error; drill slots blocked only by water count into
+      drill_skip with a clear remedy message.
+
+Version: 0.8.2
+Date: 2026-10-08
+
+  Bugfixes:
+    - fill: fuel_categories is a DICT {name=true} — the candidate matcher
+      iterated VALUES instead of KEYS, so no carried fuel ever matched a
+      burner (fill reported "nothing accepted" everywhere). Fixed both
+      the smart matcher and fuel_accepted_by.
+
+Version: 0.8.1
+Date: 2026-10-08
+
+  Changes:
+    - Unified ACTION model: every step key is "action"; compound actions
+      (formerly "skills") and atomic actions (formerly "primitives")
+      dispatch through the same key (legacy "skill" key stays an alias).
+      Batch-first parameters everywhere a list makes sense.
+    - place_batch is now a PRECISE GHOST EXECUTOR: it builds ONLY listed
+      entities that already exist as ghosts (plan_blueprint first), matching
+      exact position and direction, with an atomic inventory pre-check and
+      post-build audit. Nothing un-ghosted is ever placed, so mixed-agent
+      ghost fields stay untouched.
+    - New generic resupply action fill(items? | item+count, radius?):
+      explicit items go to every nearby entity that accepts them (fuel slot
+      for accepted fuels, container/machine input otherwise); without items
+      each device gets what it needs (burners: best accepted fuel by
+      category+value; machines: recipe ingredients; labs: science packs;
+      turrets: ammo). Replaces fuel_all (coal-only).
+    - New generic fetch action collect(items | item+count, radius?):
+      takes EXACT quantities from nearby containers, nearest first; there
+      is deliberately NO take-everything mode. Replaces loot_chests.
+    - Removed compound actions build_miner and build_smelter — superseded
+      by the ghost-first flow (plan_blueprint → place_batch /
+      plan_mining_outpost for mining arrays).
+
+---------------------------------------------------------------------------------------------------
+Version: 0.8.0
+Date: 2026-10-08
+
+  Features:
+    - New skill plan_mining_outpost: ONE call turns an ore patch into a
+      complete ghost layout of mining drills + output belts + power poles.
+      Canonical outpost rules (official wiki) with ALL geometry derived from
+      live prototypes: drills on a lattice of step 2H+1 (H =
+      floor(mining_drill_radius)) cover the patch fully with no
+      overlap (electric 3x3/5x5 -> step 5; big-mining-drill 5x5/13x13 ->
+      step 13); paired drill rows face each other onto shared belt rows
+      (drop offset floor(F/2)+1); power poles chained on street rows
+      between pairs, spacing min(wire-1, 2*supply+1) from the prototype
+      (2.0 poles rebalanced - medium is 7x7 supply / 9 wire). Drill, pole
+      and belt tiers are parameters (drill/pole/belt); a pole too small for
+      the lattice is rejected in preflight with the substation hint.
+      Params: resource, x/y (patch centre), direction (belt flow, default
+      east), drill, pole, belt, min_ore (default 4), max_drills (default
+      120), radius (default 64). Reports ore coverage % and the exact item
+      list for gather/craft + build_ghosts; re-runs extend the plan.
+      Ghost semantics follow the 0.7.10 calibration (water-guarded direct
+      create, no false-strict can_place gate).
+
+Version: 0.7.10
+Date: 2026-10-08
+
+  Bugfixes:
+    - plan_blueprint no longer gates ghost creation on
+      can_place_entity{build_check_type=blueprint_ghost}: that check is
+      stricter than real ghost placement (belt ghosts inside an existing
+      ghost field — or over trees, as GUI blueprints routinely do — report
+      false while create_entity succeeds). The ghost is now created directly
+      and the engine's own accept/reject is the verdict; alignment stays
+      strictly validated before creation.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.9
+Date: 2026-10-08
+
+  Bugfixes:
+    - aligned_position is now ROTATION-AWARE: east/west facings swap the
+      axes, so an east-facing 3x2 boiler occupies 2 wide x 3 high and its
+      aligned anchor is (integer x, n+0.5 y). Previously the unrotated
+      prototype box was used, rejecting every legal east/west anchor of
+      even-side entities (e.g. boiler east at (-25,-49.5)). plan_blueprint,
+      place_batch and build_smelter all pass direction into the check.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.8
+Date: 2026-10-08
+
+  Changes:
+    - EXACT-COORDINATE CONTRACT: plan_blueprint and build_smelter no longer
+      snap anchors by tile parity (calibrated: the old snap rewrote inputs
+      like (-25,-57.5) -> (-24.5,-57) for a 3x2 boiler, silently moving
+      layouts by half a tile). Misaligned entries are now REJECTED with the
+      nearest legal coordinate spelled out; aligned input lands verbatim.
+    - New skill place_batch(entities): direct batch placement of up to 500
+      aligned entities from inventory in one call (atomic shortage check,
+      per-entry legality, skip+report) — no per-entity place primitives.
+    - New skill review_build(area | x,y+radius | last batch): commissioning
+      audit with status buckets, problem entities and unbuilt-ghost count;
+      defaults to the character's last place_batch/build_ghosts batch.
+    - New skill clear_ghosts(area | x,y+radius | name?): batch-remove entity
+      ghosts; never touches real buildings.
+    - build_ghosts now ends with a mandatory post-build audit (same status
+      vocabulary as factory attention) and remembers the batch for
+      review_build.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.7
+Date: 2026-10-08
+
+  Changes:
+    - New read-only query get_chart_tags: lists the chart tags (map labels)
+      on the AI force's surface — both human-placed GUI map notes and
+      agent-created annotation tags — with position, text, icon and author.
+      Optional x/y sorts by distance and radius>0 filters to that range.
+      This is the missing read side of the map-annotation channel: humans
+      can now leave labelled areas on the map and AI players can read them.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.6
+Date: 2026-10-08
+
+  Misc:
+    - Development loop: scripts/local-headless.sh now deploys the packed mod
+      zip to BOTH the isolated headless server mods dir and the GUI client
+      mods dir (~/Library/Application Support/factorio/mods), removing stale
+      ai-coworker zips on each side, so a connecting client always matches
+      the server's mod version without a manual copy.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.5
+Date: 2026-10-08
+
+  Bugfixes:
+    - scan_area no longer renders features outside GENERATED chunks: the
+      water/resource/entity passes used find_*_filtered over the raw rect,
+      so ungenerated ocean showed up as 'W' while explored_pct said 0.
+      Feature queries are now clamped to the generated bounding box and
+      skipped entirely for fully-ungenerated rects; mark() itself is gated
+      on the generated-chunk bitmap, so grid chars and explored_pct can
+      never disagree.
+    - scan_area roster entries and factory attention/roster entries now
+      include unit_number, so genuinely overlapping entities (placeable via
+      Lua create_entity) are distinguishable from duplicated tool output.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.4
+Date: 2026-10-06
+
+  Changes:
+    - The follow-the-character chart tag is now OPT-IN: markers() no longer
+      creates one by default (roles are not points of interest on the map);
+      it appears only when a role explicitly sets a string map_tag. The
+      around-character charting (AI exploration) and overhead label are
+      unchanged. Static map_tag tables from 0.7.2 are the recommended way
+      to name areas.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.3
+Date: 2026-10-06
+
+  Bugfixes:
+    - remove_agent now performs a FULL cleanup: destroys the character,
+      follow chart tag, overhead label and static chart tags, and deletes
+      the stored profile. Previously it only destroyed the character, so
+      "removed" roles still appeared in list_agents and leaked labels/tags.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.2
+Date: 2026-10-06
+
+  Features:
+    - set_annotation: map_tag as a TABLE {text, icon?, position?} creates a
+      persistent, STATIONARY chart tag at that position (repeatable, capped
+      at 50 per role); map_tag as a string keeps the legacy follow-the-role
+      behaviour. clear_tags=true removes all static tags; clear=true clears
+      both. Tags chart their surroundings so they are visible immediately.
+    - factorio_annotate (facade): map_tag accepts the dict form, new
+      clear_tags parameter.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.1
+Date: 2026-10-06
+
+  Bugfixes:
+    - set_annotation: declare the local summary() before its use — the
+      forward reference resolved to a nil global and made factorio_annotate
+      fail with "attempt to call global 'summary' (a nil value)".
+    - plan_blueprint: snap coordinates by entity size parity — odd-width
+      entities centre on tile centres (.5), even-width on tile corners (.0)
+      instead of blindly offsetting everything by +0.5.
+    - scan_area: the entities roster and the 'B'/'g' grid marks now only
+      include OUR force's buildings/ghosts — neutral entities (fish) no
+      longer show up as buildings, matching the documented contract.
+    - scan_area: entity direction is now a string ("north"/"east"/...) in
+      the roster instead of the raw defines.direction number, matching
+      plan_blueprint's input format.
+    - scan_area: width/height above 128 now return a clear error instead of
+      being silently clamped (silent clamps made agents believe a larger
+      region was covered).
+    - clear_area: teleport the character back to its start position after
+      clearing instead of leaving it next to the last mined obstacle.
+    - get_resource_patch all=true: drop mined-out remnant clusters
+      (average amount ~1 per tile) from the patch list.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.7.0
+Date: 2026-10-06
+
+  Features:
+    - New scan_area query (exposed as the dedicated factorio_map MCP tool):
+      compressed tile grid of a region (land/water/trees/rocks/cliffs/enemies/
+      allied buildings/ghosts/resources) limited to explored chunks, plus a
+      precise allied-entity roster (name/type/position/direction).
+    - New clear_area skill: clear natural obstacles (trees, rocks) in a
+      region WITHOUT requiring human deconstruction marks (user-authorized);
+      never touches unmarked buildings; reports cliffs and remaining count.
+    - New plan_blueprint skill: lay a whole planned layout as persistent
+      entity ghosts in one call (<=500 entries, blueprint-ghost legality),
+      ready for build_ghosts to execute.
+    - get_resource_patch: all=true (or radius=0) removes the radius cap and
+      returns EVERY known patch on the explored map, clustered by tile
+      adjacency (crude-oil merged with looser linkage), nearest-first.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.6.5
+Date: 2026-10-06
+
+  Bugfixes:
+    - session spawn: return ok=true after a successful spawn/refresh instead
+      of an misleading ok=false from the summary table.
+    - gather: report "already have N (need M)" as success instead of the
+      misleading "no reachable sources" when the inventory already satisfies
+      the request.
+    - build_miner: try the 12 nearest resource tiles (4 directions each)
+      instead of giving up when the single closest tile is blocked.
+    - loot_chests: honor item+count — take at most `count` of the named item;
+      without them the old take-matching-items behavior remains. Never drain
+      everything unless explicitly asked via items=""/no filter.
+    - deposit_to_chest: honor item+count — deposit exactly `count` of the
+      named item; keep+radius behavior unchanged when omitted.
+    - research: honor a named technology (tech/technology/name) idempotently
+      (already researched/in-progress/queued => ok) and never fall through to
+      the autopilot pick when a name was given; unknown names now error.
+    - goto: accept flat x/y in addition to position={x,y}.
+    - queries: get_recipe accepts name or recipe; nearest_buildable and
+      can_place accept entity or item; can_place/inspect_entity/
+      get_resource_patch/nearest_buildable accept position={x,y} as well as
+      flat x/y.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.6.4
+Date: 2026-10-06
+
+  Bugfixes:
+    - Replace the removed Factorio 1.1 rendering.destroy(id) calls with the
+      2.0 LuaRendering:destroy() method so stale role labels can be redrawn;
+      rebinding an existing role no longer fails with
+      "LuaRendering doesn't contain key destroy".
+
+---------------------------------------------------------------------------------------------------
+Version: 0.6.3
+Date: 2026-10-06
+
+  Features:
+    - Remote interface: set_annotation controls a role's overhead label,
+      following map chart tag, and virtual-signal icon with bounded text.
+    - OpenCode MCP facade: factorio_annotate exposes the same scoped API for
+      the currently bound role; arbitrary coordinates and Lua remain blocked.
+
+  Changes:
+    - Unblock the `deconstruct` skill and the `mine` primitive at the mod's
+      remote interface; `destroy` stays disabled. Project policy still
+      requires explicit user authorization before calling `deconstruct`.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.6.2
+Date: 2026-10-05
+
+  Changes:
+    - Allow the maintenance bridge to purge only historical session-* role profiles.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.6.1
+Date: 2026-10-05
+  Features:
+    - build_smelter keeps strategic furnace, strategy, and target-output
+      parameters while the runtime owns placement, fuelling, and retries.
+    - OpenCode MCP facade batches bounded skills and returns compact state
+      hashes and top-level changes.
+---------------------------------------------------------------------------------------------------
+Version: 0.4.2
+Date: 2026-08-29
+  Features:
+    - Remote interface: get_chat lets an external harness poll the mod's
+      chat ring buffer directly (no python bridge needed).
+    - Remote interface: import_blueprint stages a blueprint string as entity
+      ghosts at a position (build_blueprint, falling back to manual
+      entity-ghost creation on Factorio 2.0 where the 1.x API path returns
+      nothing).
+    - Remote interface: export_blueprint captures a rectangle of the world
+      to a blueprint string.
+---------------------------------------------------------------------------------------------------
+Version: 0.4.0
+Date: 2026-07-16
+  Features:
+    - Remote interface: query/list_queries expose a read-only query registry
+      (get_recipe, get_resource_patch, can_place, nearest_buildable,
+      inspect_entity, get_enemies, get_character_state) for external callers,
+      alongside the existing skill/primitive surface.
+    - Remote interface: run_primitive lets external callers (e.g. an MCP
+      client) invoke the same Tier-0 actions (place, mine, craft, set_recipe,
+      insert, take, chat) the autonomous bridge LLM uses.
+  Changes:
+    - perception.lua: extracted describe_entity() so inspect_entity returns
+      exactly what the autonomous router sees.
+    - primitives.lua: exported placement_problem/DIRECTION_MAP for can_place.
+---------------------------------------------------------------------------------------------------
+Version: 0.3.5
+Date: 2026-07-11
+  Bugfixes:
+    - Fixed teleport commands stacking multiple characters on top of each
+      other.
+---------------------------------------------------------------------------------------------------
+Version: 0.6.0
+  - MCP no longer creates a random character on process startup.
+  - Added explicit create_ai_player(name, agent_id) role binding.
+  - Added configurable role limit and periodic idle-role cleanup.

@@ -1,0 +1,363 @@
+{
+  "tick": 480059,
+  "game_phase": 1,
+  "coop": true,
+  "autonomy": false,
+  "power": {
+    "has_grid": true,
+    "machines_no_power": 0,
+    "machines_low_power": 0,
+    "production_kw": 3,
+    "consumption_kw": 3
+  },
+  "character": {
+    "position": {
+      "x": 5,
+      "y": 37
+    },
+    "health_pct": 100,
+    "home_distance": 0
+  },
+  "inventory": [
+    {
+      "name": "coal",
+      "count": 100
+    },
+    {
+      "name": "stone",
+      "count": 50
+    },
+    {
+      "name": "iron-plate",
+      "count": 50
+    },
+    {
+      "name": "wood",
+      "count": 50
+    },
+    {
+      "name": "transport-belt",
+      "count": 50
+    },
+    {
+      "name": "copper-plate",
+      "count": 30
+    },
+    {
+      "name": "pipe",
+      "count": 20
+    },
+    {
+      "name": "small-electric-pole",
+      "count": 20
+    },
+    {
+      "name": "burner-inserter",
+      "count": 10
+    },
+    {
+      "name": "stone-furnace",
+      "count": 4
+    },
+    {
+      "name": "iron-chest",
+      "count": 4
+    },
+    {
+      "name": "burner-mining-drill",
+      "count": 4
+    },
+    {
+      "name": "assembling-machine-1",
+      "count": 2
+    },
+    {
+      "name": "steam-engine",
+      "count": 2
+    },
+    {
+      "name": "boiler",
+      "count": 2
+    },
+    {
+      "name": "lab",
+      "count": 1
+    },
+    {
+      "name": "offshore-pump",
+      "count": 1
+    }
+  ],
+  "research": {
+    "current": "fast-inserter",
+    "progress": 45
+  },
+  "factory": {
+    "total": 47,
+    "by_type": {
+      "lab": 3,
+      "stone-furnace": 9,
+      "assembling-machine-1": 4,
+      "boiler": 5,
+      "steam-engine": 7,
+      "burner-mining-drill": 16,
+      "offshore-pump": 3
+    },
+    "by_status": {
+      "no_research": 1,
+      "no_ingredients": 6,
+      "no_input_fluid": 5,
+      "working": 28,
+      "output_full": 6,
+      "no_fuel": 1
+    },
+    "attention": [
+      {
+        "name": "burner-mining-drill",
+        "type": "mining-drill",
+        "status": "no_fuel",
+        "position": {
+          "x": -2,
+          "y": 58
+        },
+        "distance": 22
+      },
+      {
+        "name": "stone-furnace",
+        "type": "furnace",
+        "status": "output_full",
+        "position": {
+          "x": 2,
+          "y": 60
+        },
+        "distance": 23
+      },
+      {
+        "name": "stone-furnace",
+        "type": "furnace",
+        "status": "output_full",
+        "position": {
+          "x": -2,
+          "y": 60
+        },
+        "distance": 24
+      },
+      {
+        "name": "stone-furnace",
+        "type": "furnace",
+        "status": "no_ingredients",
+        "position": {
+          "x": -23,
+          "y": 58
+        },
+        "distance": 35
+      },
+      {
+        "name": "stone-furnace",
+        "type": "furnace",
+        "status": "no_ingredients",
+        "position": {
+          "x": -25,
+          "y": 58
+        },
+        "distance": 36
+      },
+      {
+        "name": "stone-furnace",
+        "type": "furnace",
+        "status": "no_ingredients",
+        "position": {
+          "x": -27,
+          "y": 56
+        },
+        "distance": 37
+      },
+      {
+        "name": "assembling-machine-1",
+        "type": "assembling-machine",
+        "status": "output_full",
+        "position": {
+          "x": -34,
+          "y": 34
+        },
+        "distance": 38
+      },
+      {
+        "name": "assembling-machine-1",
+        "type": "assembling-machine",
+        "status": "no_ingredients",
+        "position": {
+          "x": -42,
+          "y": 36
+        },
+        "distance": 46
+      },
+      {
+        "name": "burner-mining-drill",
+        "type": "mining-drill",
+        "status": "output_full",
+        "position": {
+          "x": -30,
+          "y": 90
+        },
+        "distance": 63
+      },
+      {
+        "name": "burner-mining-drill",
+        "type": "mining-drill",
+        "status": "output_full",
+        "position": {
+          "x": -36,
+          "y": 92
+        },
+        "distance": 68
+      },
+      {
+        "name": "steam-engine",
+        "type": "generator",
+        "status": "no_input_fluid",
+        "position": {
+          "x": -8,
+          "y": -38
+        },
+        "distance": 75
+      },
+      {
+        "name": "steam-engine",
+        "type": "generator",
+        "status": "no_input_fluid",
+        "position": {
+          "x": -4,
+          "y": -38
+        },
+        "distance": 75
+      },
+      {
+        "name": "boiler",
+        "type": "boiler",
+        "status": "output_full",
+        "position": {
+          "x": -8,
+          "y": -41
+        },
+        "distance": 79
+      },
+      {
+        "name": "steam-engine",
+        "type": "generator",
+        "status": "no_input_fluid",
+        "position": {
+          "x": -44,
+          "y": -47
+        },
+        "distance": 96
+      },
+      {
+        "name": "stone-furnace",
+        "type": "furnace",
+        "status": "no_ingredients",
+        "position": {
+          "x": -48,
+          "y": -44
+        },
+        "distance": 97
+      },
+      {
+        "name": "assembling-machine-1",
+        "type": "assembling-machine",
+        "status": "no_ingredients",
+        "position": {
+          "x": -52,
+          "y": -43
+        },
+        "distance": 97
+      },
+      {
+        "name": "boiler",
+        "type": "boiler",
+        "status": "no_input_fluid",
+        "position": {
+          "x": -47,
+          "y": -47
+        },
+        "distance": 98
+      },
+      {
+        "name": "lab",
+        "type": "lab",
+        "status": "no_research",
+        "position": {
+          "x": -52,
+          "y": -47
+        },
+        "distance": 101
+      },
+      {
+        "name": "steam-engine",
+        "type": "generator",
+        "status": "no_input_fluid",
+        "position": {
+          "x": -42,
+          "y": -76
+        },
+        "distance": 121
+      }
+    ]
+  },
+  "production": {
+    "items": {
+      "coal": {
+        "total": 1624,
+        "per_min": 30
+      },
+      "stone": {
+        "total": 625,
+        "per_min": 45
+      },
+      "iron-ore": {
+        "total": 1977,
+        "per_min": 75
+      },
+      "copper-ore": {
+        "total": 1802,
+        "per_min": 56
+      },
+      "iron-plate": {
+        "total": 1447,
+        "per_min": 53
+      },
+      "copper-plate": {
+        "total": 852,
+        "per_min": 0
+      },
+      "iron-gear-wheel": {
+        "total": 67,
+        "per_min": 5
+      },
+      "copper-cable": {
+        "total": 70,
+        "per_min": 40
+      },
+      "electronic-circuit": {
+        "total": 10,
+        "per_min": 0
+      },
+      "automation-science-pack": {
+        "total": 50,
+        "per_min": 1
+      }
+    },
+    "techs_researched": 6
+  },
+  "needs": {
+    "burners_low_fuel": 1,
+    "machines_no_recipe": 0,
+    "machines_no_input": 6,
+    "outputs_full": 6
+  },
+  "ghosts": 0,
+  "deconstruction": 0,
+  "agent_id": "chief-designer-v2",
+  "name": "总设计师-区域规划",
+  "unit_number": 804
+}

@@ -1,0 +1,12 @@
+{
+  "name": "ai-coworker",
+  "version": "0.8.5",
+  "title": "Factorio AI Coworker (dynamic CLI roles)",
+  "author": "Factorio AI Coworker contributors",
+  "factorio_version": "2.0",
+  "dependencies": [
+    "base >= 2.0"
+  ],
+  "description": "Dynamic AI players controlled by the Factorio AI Coworker CLI over RCON.",
+  "homepage": "https://github.com/Suixinlei/factorio-ai-coworker"
+}
